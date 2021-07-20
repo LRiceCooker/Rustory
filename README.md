@@ -1,2 +1,2 @@
 # Rustory
-ligthweigth role play game manager
+A ligthweigth role play game manager
