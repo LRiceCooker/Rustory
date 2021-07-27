@@ -1,30 +1,21 @@
-use std::io::Write;
-use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
-
-fn write(message : String, color : termcolor::Color){
-    let bufwtr = BufferWriter::stderr(ColorChoice::Always);
-    let mut buffer = bufwtr.buffer();
-    buffer.set_color(ColorSpec::new().set_fg(Some(color)));
-    writeln!(&mut buffer,"{}", message);
-    bufwtr.print(&buffer);
-}
+use ansi_term::Colour;
 
 pub fn primary(message : String){
-    write(message, Color::Cyan);
+    println!("{}", Colour::Blue.bold().paint(message));
 }
 
 pub fn danger(message : String){
-    write(message, Color::Red);
+    println!("{}", Colour::Red.bold().paint(message));
 }
 
 pub fn warning(message : String){
-    write(message, Color::Yellow);
+    println!("{}", Colour::Yellow.bold().paint(message));
 }
 
 pub fn success(message : String){
-    write(message, Color::Green);
+    println!("{}", Colour::Green.bold().paint(message));
 }
 
 pub fn regular(message : String){
-    write(message, Color::White);
+    println!("{}", Colour::White.bold().paint(message));
 }
