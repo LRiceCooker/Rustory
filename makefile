@@ -1,17 +1,8 @@
+run:
+	./scripts/run.sh
+
 build:
 	./scripts/build.sh
-
-run:
-	./scripts/run.sh linux
-
-run-mac:
-	./scripts/run.sh mac
-
-run-win:
-	./scripts/run.sh win
-
-run-linux:
-	./scripts/run.sh linux
 
 build-linux:
 	./scripts/build.sh linux
