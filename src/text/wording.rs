@@ -1,7 +1,6 @@
-use std::fs;
-use serde_json::{Result, Value};
+use std::{fs};
 
-#[path="../struct/wording/mod.rs"]
+#[path="../types/wording/mod.rs"]
 mod wording;
 
  fn get_raw_data () -> String {
@@ -10,8 +9,8 @@ mod wording;
     return raw_data;
 }
 
-pub fn get() -> Value {
-    let result: Value = serde_json::from_str(&get_raw_data ()).unwrap();
+pub fn get() -> wording::Wording {
+    let result: wording::Wording = serde_json::from_str(&get_raw_data()).expect("Unable to parse"); //c'est sencé marcher 
      
     return result;
 }
