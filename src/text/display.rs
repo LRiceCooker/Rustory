@@ -1,21 +1,34 @@
-use ansi_term::Colour;
+use crossterm::{
+    execute,
+    style::{Color, Print, ResetColor, SetForegroundColor},
+};
+use std::io::{stdout};
+
+fn show (color : Color, message: String){
+    execute!(
+        stdout(),
+        SetForegroundColor(color),
+        Print(message),
+        ResetColor
+    ).expect("Oops ! it's break ! please report this issue :p");
+}
 
 pub fn primary(message : String){
-    println!("{}", Colour::Blue.bold().paint(message));
+   show(Color::Blue, message);
 }
 
 pub fn danger(message : String){
-    println!("{}", Colour::Red.bold().paint(message));
+    show(Color::Red, message);
 }
 
 pub fn warning(message : String){
-    println!("{}", Colour::Yellow.bold().paint(message));
+    show(Color::Yellow, message);
 }
 
 pub fn success(message : String){
-    println!("{}", Colour::Green.bold().paint(message));
+    show(Color::Green, message);
 }
 
 pub fn regular(message : String){
-    println!("{}", Colour::White.bold().paint(message));
+    show(Color::White, message);
 }
