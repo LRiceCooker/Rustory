@@ -1,2 +1,5 @@
+x86_64-apple-darwin/
 /target
 .vscode/
+.rustc_info.json
+Cargo.lock
