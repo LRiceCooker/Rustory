@@ -32,3 +32,7 @@ pub fn success(message : String){
 pub fn regular(message : String){
     show(Color::White, message);
 }
+
+pub fn dark(message : String){
+    show(Color::DarkMagenta, message);
+}
