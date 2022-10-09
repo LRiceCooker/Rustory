@@ -1,11 +1,13 @@
-use image2ascii;
-#[path="../text/mod.rs"]
-mod text; 
+use viuer::{print_from_file, Config};
 
-pub fn load(map_path: &str) {
-    let termsize::Size { rows , cols} = termsize::get().unwrap();
-    let parsed_map = image2ascii::image2ascii(map_path, cols.into(), Some(0.1), Some("@#/\\. ")).expect("Error loading map");
-    for row in parsed_map.to_lines().iter() {
-        text::display::dark(row.to_string());
-    }
+pub fn load() {
+    let termsize::Size {rows, cols} = termsize::get().unwrap();
+    let conf = Config {
+        x: cols / 4,
+        y: 0,
+        width: Some((cols / 2).into()),
+        height: Some((rows / 2).into()),
+        ..Default::default()
+    };
+    print_from_file("sample/map/test.png", &conf).expect("Image printing failed.");
 }
