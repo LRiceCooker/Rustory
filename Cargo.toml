@@ -13,3 +13,4 @@ serde_with = { version = "1.4.0", features = ["json"]}
 crossterm = {version = "0.20", features = ["event-stream"]}
 viuer = "0.5.3"
 termsize = "0.1.6"
+toml = "0.4.2"

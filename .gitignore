@@ -3,3 +3,4 @@ x86_64-apple-darwin/
 .vscode/
 .rustc_info.json
 Cargo.lock
+.DS_Store
