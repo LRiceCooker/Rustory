@@ -1,1 +1,1 @@
-pub mod mapLoader;
+pub mod map_loader;
