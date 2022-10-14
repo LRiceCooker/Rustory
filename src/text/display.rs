@@ -3,6 +3,8 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetForegroundColor},
 };
 use std::io::{stdout};
+#[path = "./wording.rs"]
+mod wording;
 
 fn show (color : Color, message: String){
     execute!(
@@ -10,7 +12,7 @@ fn show (color : Color, message: String){
         SetForegroundColor(color),
         Print(message),
         ResetColor
-    ).expect("Oops ! it's break ! please report this issue :p");
+    ).expect(wording::lang()["error"]["idk"].to_string().as_str());
 }
 
 pub fn primary(message : String){
