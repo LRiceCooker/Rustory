@@ -1,5 +1,7 @@
 [error]
 idk = "Oops ! It's break :p please report this issue."
+unknown_command = "It's not even exist xD, read the doc with 'help' command !"
+
 [command_help]
 body = "here is some help"
 

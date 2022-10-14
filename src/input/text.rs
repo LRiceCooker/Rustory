@@ -2,9 +2,10 @@ use inquire::{Text, CustomUserError};
 
 #[path = "../text/wording.rs"]
 mod wording;
-
 #[path = "../commands/mapping.rs"]
 mod mapping;
+#[path = "./validators.rs"]
+mod validators;
 
 fn suggester(val: &str) -> Result<Vec<String>, CustomUserError> {
     let val_lower = val.to_lowercase();
@@ -17,10 +18,11 @@ fn suggester(val: &str) -> Result<Vec<String>, CustomUserError> {
     )
 }
 
-pub fn get() {
+pub fn get() -> String {
     let user_input = Text::new("rustory >")
         .with_autocomplete(&suggester)
+        .with_validator(&validators::should_exist)
         .prompt()
         .unwrap();
-    println!("{}", user_input);
+    return user_input
 }
