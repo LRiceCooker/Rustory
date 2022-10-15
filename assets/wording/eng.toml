@@ -5,5 +5,13 @@ unknown_command = "It's not even exist xD, read the doc with 'help' command !"
 [command_help]
 body = "here is some help"
 
+[command_roll]
+dice = "dice(s)"
+modifier = "modifier"
+max_value = "maximum value"
+result = "result"
+natural = "natural"
+error = "invalid payload. The right format is 'roll 1d10+1' "
+
 [home_screen]
 title = "yahooooooooo"
