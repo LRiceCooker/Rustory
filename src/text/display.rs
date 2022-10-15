@@ -3,6 +3,7 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetForegroundColor},
 };
 use std::io::{stdout};
+
 #[path = "./wording.rs"]
 mod wording;
 
@@ -10,7 +11,7 @@ fn show (color : Color, message: String){
     execute!(
         stdout(),
         SetForegroundColor(color),
-        Print(message),
+        Print(message.replace('"', "")),
         ResetColor
     ).expect(wording::lang()["error"]["idk"].to_string().as_str());
 }
