@@ -2,6 +2,8 @@
 mod mapping; 
 #[path = "./rustory_commands.rs"]
 mod rustory_commands;
+#[path = "./game_commands.rs"]
+mod game_commands;
 #[path = "../text/mod.rs"]
 mod text;
 
@@ -14,7 +16,8 @@ pub fn eval(raw_command: String) {
 
     match matchable_command {
         Some(mapping::COMMANDS::QUIT) => {}, 
-        Some(mapping::COMMANDS::HELP) => rustory_commands::help(splited_args), 
+        Some(mapping::COMMANDS::HELP) => rustory_commands::help(), 
+        Some(mapping::COMMANDS::ROLL) => game_commands::roll(splited_args),
         _ => text::display::danger(text::wording::lang()["error"]["unknown_command"].to_string())
     };
 }
