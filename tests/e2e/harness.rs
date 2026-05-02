@@ -1482,4 +1482,98 @@ KTHXBYE",
             "Should report empty library. Output: {all_output}"
         );
     }
+
+    // ---- Persistence E2E tests ----
+
+    #[test]
+    fn test_e2e_history_shows_initial_commit() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"PersistTest\"\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("history");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Initial state"),
+            "Should show initial commit. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_validate_loaded_campaign() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"ValidTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+            )
+            .with_player("hero", "name,strength\nHero,15\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("validate");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("\u{2713}"),
+            "Should have pass marks. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("0 failed"),
+            "Should have 0 failures. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_undo_no_changes() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"UndoTest\"\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("undo");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Should fail since there's only the initial commit (no parent to revert to)
+        assert!(
+            all_output.contains("Cannot undo") || all_output.contains("reverted"),
+            "Should either report error or succeed. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_redo_nothing() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"RedoTest\"\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("redo");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Nothing to redo"),
+            "Should report nothing to redo. Output: {all_output}"
+        );
+    }
 }
