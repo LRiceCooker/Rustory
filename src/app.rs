@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::RngCore;
@@ -9,6 +11,9 @@ use crate::commands::dispatcher::{self, CommandResult, StyledLine};
 use crate::commands::mapping;
 use crate::game_state::loader;
 use crate::game_state::GameState;
+use crate::scripting::api::ScriptContext;
+use crate::scripting::engine::ScriptEngine;
+use crate::scripting::loader::LolScript;
 use crate::ui;
 
 /// Recursively copy a directory and all its contents.
@@ -172,9 +177,73 @@ impl App {
             return;
         }
 
-        // Dispatch and handle the result via the stateless dispatcher
+        // Dispatch via the stateless dispatcher
         let result = dispatcher::dispatch(input, &mut self.rng);
+
+        // If unknown, try custom commands from the loaded campaign
+        if let CommandResult::Unknown(ref cmd) = result {
+            let custom_script = self
+                .game_state
+                .as_ref()
+                .and_then(|gs| gs.custom_commands.get(&cmd.to_lowercase()))
+                .cloned();
+
+            if let Some(script) = custom_script {
+                self.execute_custom_command(&script);
+                return;
+            }
+        }
+
         self.apply_command_result(result);
+    }
+
+    fn execute_custom_command(&mut self, script: &LolScript) {
+        // Temporarily take game_state and rng for ScriptContext ownership
+        let game_state = match self.game_state.take() {
+            Some(gs) => gs,
+            None => return,
+        };
+        let rng = std::mem::replace(&mut self.rng, Box::new(rand::thread_rng()));
+
+        let ctx = Rc::new(RefCell::new(ScriptContext::new(game_state, rng)));
+        let mut engine = ScriptEngine::new();
+        ScriptContext::register_api(ctx.clone(), &mut engine);
+
+        match engine.execute(&script.source) {
+            Ok(stdout_output) => {
+                // Show RUSTORY_DISPLAY messages
+                for line in &ctx.borrow().output {
+                    self.messages.push(Message {
+                        text: line.clone(),
+                        style: Style::default().fg(Color::Blue),
+                    });
+                }
+                // Show VISIBLE stdout output
+                let trimmed = stdout_output.trim_end();
+                if !trimmed.is_empty() {
+                    for line in trimmed.lines() {
+                        self.messages.push(Message {
+                            text: line.to_string(),
+                            style: Style::default().fg(Color::Blue),
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                self.messages.push(Message {
+                    text: format!("Script error: {e}"),
+                    style: Style::default().fg(Color::Red),
+                });
+            }
+        }
+
+        // Recover game_state and rng from ScriptContext
+        let ctx_inner = match Rc::try_unwrap(ctx) {
+            Ok(cell) => cell.into_inner(),
+            Err(_) => panic!("ScriptContext should have no other references"),
+        };
+        self.game_state = Some(ctx_inner.game_state);
+        self.rng = ctx_inner.rng;
     }
 
     fn apply_command_result(&mut self, result: CommandResult) {
@@ -1319,6 +1388,157 @@ mod tests {
                 .iter()
                 .any(|t| t.contains("heal") && t.contains("smite")),
             "help should list custom commands. Messages: {output_texts:?}"
+        );
+    }
+
+    // --- custom command execution tests ---
+
+    #[test]
+    fn test_custom_command_executes_and_shows_output() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("lol_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules/commands")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        let player_dir = campaign_dir.join("players/hero");
+        std::fs::create_dir_all(&player_dir).unwrap();
+        std::fs::write(player_dir.join("sheet.csv"), "name,strength\nHero,15\n").unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/greet.lol"),
+            "HAI 1.2\nI IZ RUSTORY_DISPLAY YR \"Hello from script\" MKAY\nKTHXBYE\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+        app.messages.clear();
+
+        app.dispatch_command("greet");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("Hello from script")),
+            "Custom command should produce output. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_custom_command_reads_stat() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("stat_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules/commands")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        let player_dir = campaign_dir.join("players/thorin");
+        std::fs::create_dir_all(&player_dir).unwrap();
+        std::fs::write(
+            player_dir.join("sheet.csv"),
+            "name,strength\nThorin,18\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/showstr.lol"),
+            "HAI 1.2\nI IZ RUSTORY_GET_PLAYER YR \"Thorin\" MKAY\nI HAS A STR ITZ I IZ RUSTORY_GET_STAT YR \"strength\" MKAY\nVISIBLE STR\nKTHXBYE\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+        app.messages.clear();
+
+        app.dispatch_command("showstr");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("18")),
+            "Custom command should show stat value. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_builtin_wins_over_custom_command() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("override_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules/commands")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        // Create a custom command named "help" — should NOT override built-in
+        std::fs::write(
+            campaign_dir.join("rules/commands/help.lol"),
+            "HAI 1.2\nI IZ RUSTORY_DISPLAY YR \"custom help\" MKAY\nKTHXBYE\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+        app.messages.clear();
+
+        app.dispatch_command("help");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        // Built-in help should win
+        assert!(
+            output_texts.iter().any(|t| t.contains("Available commands")),
+            "Built-in help should win over custom. Messages: {output_texts:?}"
+        );
+        assert!(
+            !output_texts.iter().any(|t| t.contains("custom help")),
+            "Custom help should NOT execute. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_unknown_command_no_campaign() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("customcmd");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("Unknown command")),
+            "Unknown command without campaign should show error. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_custom_command_script_error_shows_message() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("error_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules/commands")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/broken.lol"),
+            "THIS IS NOT VALID LOLCODE",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+        app.messages.clear();
+
+        app.dispatch_command("broken");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("Script error")),
+            "Broken script should show error. Messages: {output_texts:?}"
         );
     }
 }

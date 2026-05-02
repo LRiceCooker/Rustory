@@ -924,6 +924,123 @@ mod tests {
         );
     }
 
+    // --- Phase 12 E2E: custom LOLCODE command execution ---
+
+    #[test]
+    fn test_e2e_custom_command_reads_stat_and_displays() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n")
+            .with_player("thorin", "name,strength\nThorin,18\n")
+            .with_lol_command(
+                "showstr",
+                "\
+HAI 1.2
+I IZ RUSTORY_GET_PLAYER YR \"Thorin\" MKAY
+I HAS A STR ITZ I IZ RUSTORY_GET_STAT YR \"strength\" MKAY
+I HAS A MSG ITZ SMOOSH \"Strength is \" AN STR MKAY
+I IZ RUSTORY_DISPLAY YR MSG MKAY
+KTHXBYE",
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("showstr");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Strength is 18"),
+            "Custom command should display the stat value. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_custom_command_visible_stdout_captured() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n")
+            .with_player("thorin", "name,strength\nThorin,18\n")
+            .with_lol_command(
+                "checkstr",
+                "\
+HAI 1.2
+I IZ RUSTORY_GET_PLAYER YR \"Thorin\" MKAY
+I HAS A STR ITZ I IZ RUSTORY_GET_STAT YR \"strength\" MKAY
+VISIBLE STR
+KTHXBYE",
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("checkstr");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("18"),
+            "VISIBLE output should be captured. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_custom_command_modifies_game_state() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n")
+            .with_player("thorin", "name,strength\nThorin,18\n")
+            .with_lol_command(
+                "buff",
+                "\
+HAI 1.2
+I IZ RUSTORY_GET_PLAYER YR \"Thorin\" MKAY
+I IZ RUSTORY_SET_STAT YR \"strength\" AN YR 20 MKAY
+I IZ RUSTORY_DISPLAY YR \"Thorin buffed\" MKAY
+KTHXBYE",
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("buff");
+
+        // Verify output
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_output.contains("Thorin buffed"),
+            "Should show display message. Output: {all_output}"
+        );
+
+        // Verify game state was updated
+        let gs = harness.game_state().expect("game state should exist");
+        let thorin = gs.get_player("Thorin").expect("Thorin should exist");
+        assert_eq!(
+            thorin.get_stat("strength"),
+            Some(20.0),
+            "Strength should be updated to 20"
+        );
+    }
+
+    #[test]
+    fn test_e2e_custom_command_unknown_without_campaign() {
+        let mut harness = TestHarness::new();
+        harness.execute("showstr");
+
+        let output = harness.last_output().unwrap();
+        assert!(
+            output.contains("Unknown command"),
+            "Should show unknown command error. Got: {output}"
+        );
+    }
+
     #[test]
     fn test_e2e_roll_works_after_loading_campaign() {
         let mut harness = TestHarness::with_seed(42);
