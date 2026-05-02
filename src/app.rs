@@ -18,6 +18,8 @@ pub struct App {
     pub cursor_position: usize,
     pub last_command: Option<String>,
     pub messages: Vec<Message>,
+    pub command_history: Vec<String>,
+    pub history_index: Option<usize>,
 }
 
 impl App {
@@ -28,6 +30,8 @@ impl App {
             cursor_position: 0,
             last_command: None,
             messages: Vec::new(),
+            command_history: Vec::new(),
+            history_index: None,
         }
     }
 
@@ -56,6 +60,8 @@ impl App {
             (KeyCode::Char(c), _) => self.insert_char(c),
             (KeyCode::Backspace, _) => self.delete_char_before(),
             (KeyCode::Delete, _) => self.delete_char_at(),
+            (KeyCode::Up, _) => self.history_prev(),
+            (KeyCode::Down, _) => self.history_next(),
             (KeyCode::Left, _) => self.move_cursor_left(),
             (KeyCode::Right, _) => self.move_cursor_right(),
             (KeyCode::Home, _) => self.cursor_position = 0,
@@ -73,6 +79,8 @@ impl App {
         }
 
         self.last_command = Some(input.clone());
+        self.command_history.push(input.clone());
+        self.history_index = None;
 
         // Echo the command in DarkGray
         self.messages.push(Message {
@@ -110,6 +118,41 @@ impl App {
 
         self.input.clear();
         self.cursor_position = 0;
+    }
+
+    fn history_prev(&mut self) {
+        if self.command_history.is_empty() {
+            return;
+        }
+        let new_index = match self.history_index {
+            Some(0) => 0,
+            Some(i) => i - 1,
+            None => self.command_history.len() - 1,
+        };
+        self.history_index = Some(new_index);
+        self.input = self.command_history[new_index].clone();
+        self.cursor_position = self.input.len();
+    }
+
+    fn history_next(&mut self) {
+        if self.command_history.is_empty() {
+            return;
+        }
+        match self.history_index {
+            Some(i) if i + 1 < self.command_history.len() => {
+                let new_index = i + 1;
+                self.history_index = Some(new_index);
+                self.input = self.command_history[new_index].clone();
+                self.cursor_position = self.input.len();
+            }
+            Some(_) => {
+                // Past the end of history — clear input
+                self.history_index = None;
+                self.input.clear();
+                self.cursor_position = 0;
+            }
+            None => {}
+        }
     }
 
     fn insert_char(&mut self, c: char) {
@@ -356,5 +399,66 @@ mod tests {
         assert!(app.running);
         // Echo + at least 1 output line
         assert!(app.messages.len() >= 2);
+    }
+
+    #[test]
+    fn test_history_up_cycles_back() {
+        let mut app = App::new();
+        app.running = true;
+        // Enter 3 commands
+        app.input = "help".to_string();
+        app.cursor_position = 4;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        app.input = "roll 1d6".to_string();
+        app.cursor_position = 8;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        app.input = "help".to_string();
+        app.cursor_position = 4;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        // Up arrow cycles back
+        app.on_key(KeyEvent::from(KeyCode::Up));
+        assert_eq!(app.input, "help");
+        app.on_key(KeyEvent::from(KeyCode::Up));
+        assert_eq!(app.input, "roll 1d6");
+        app.on_key(KeyEvent::from(KeyCode::Up));
+        assert_eq!(app.input, "help");
+        // At the beginning, stays there
+        app.on_key(KeyEvent::from(KeyCode::Up));
+        assert_eq!(app.input, "help");
+    }
+
+    #[test]
+    fn test_history_down_cycles_forward() {
+        let mut app = App::new();
+        app.running = true;
+        app.input = "help".to_string();
+        app.cursor_position = 4;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        app.input = "roll 1d6".to_string();
+        app.cursor_position = 8;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        // Go up twice
+        app.on_key(KeyEvent::from(KeyCode::Up));
+        app.on_key(KeyEvent::from(KeyCode::Up));
+        assert_eq!(app.input, "help");
+
+        // Down goes forward
+        app.on_key(KeyEvent::from(KeyCode::Down));
+        assert_eq!(app.input, "roll 1d6");
+
+        // Down past end clears input
+        app.on_key(KeyEvent::from(KeyCode::Down));
+        assert_eq!(app.input, "");
+        assert_eq!(app.cursor_position, 0);
+    }
+
+    #[test]
+    fn test_history_up_on_empty_does_nothing() {
+        let mut app = App::new();
+        app.running = true;
+        app.on_key(KeyEvent::from(KeyCode::Up));
+        assert_eq!(app.input, "");
     }
 }
