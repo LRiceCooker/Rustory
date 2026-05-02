@@ -15,7 +15,7 @@ use crate::game_state::loader;
 use crate::game_state::GameState;
 use crate::map::renderer::MapViewport;
 use crate::map::world::WorldMap;
-use crate::scripting::api::ScriptContext;
+use crate::scripting::api::{ScriptContext, SoundCommand};
 use crate::scripting::engine::ScriptEngine;
 use crate::scripting::loader::LolScript;
 use crate::ui;
@@ -294,13 +294,51 @@ impl App {
             }
         }
 
-        // Recover game_state and rng from ScriptContext
+        // Recover game_state, rng, and sound commands from ScriptContext
         let ctx_inner = match Rc::try_unwrap(ctx) {
             Ok(cell) => cell.into_inner(),
             Err(_) => panic!("ScriptContext should have no other references"),
         };
         self.game_state = Some(ctx_inner.game_state);
         self.rng = ctx_inner.rng;
+
+        // Process queued sound commands
+        for cmd in ctx_inner.sound_commands {
+            self.execute_sound_command(cmd);
+        }
+    }
+
+    fn execute_sound_command(&mut self, cmd: SoundCommand) {
+        let player = match &mut self.audio_player {
+            Some(p) => p,
+            None => return, // No audio device — silently skip
+        };
+
+        match cmd {
+            SoundCommand::Play(filename) => {
+                if let Some(full_path) = self.sound_library.resolve(&filename) {
+                    if let Err(e) = player.play(&full_path) {
+                        self.messages.push(Message {
+                            text: format!("Sound error: {e}"),
+                            style: Style::default().fg(Color::Red),
+                        });
+                    }
+                }
+            }
+            SoundCommand::PlayLoop(filename) => {
+                if let Some(full_path) = self.sound_library.resolve(&filename) {
+                    if let Err(e) = player.play_loop(&full_path) {
+                        self.messages.push(Message {
+                            text: format!("Sound error: {e}"),
+                            style: Style::default().fg(Color::Red),
+                        });
+                    }
+                }
+            }
+            SoundCommand::Stop => {
+                player.stop();
+            }
+        }
     }
 
     fn apply_command_result(&mut self, result: CommandResult) {

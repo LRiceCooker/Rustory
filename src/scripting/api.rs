@@ -13,6 +13,14 @@ use crate::rules::resolver;
 
 use super::engine::ScriptEngine;
 
+/// A sound command queued during LOLCODE script execution.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SoundCommand {
+    Play(String),
+    PlayLoop(String),
+    Stop,
+}
+
 /// Context shared by all RUSTORY_* API functions during script execution.
 ///
 /// Temporarily owns the GameState (moved from App) and provides RNG,
@@ -22,8 +30,8 @@ pub struct ScriptContext {
     pub rng: Box<dyn RngCore>,
     /// Display messages collected via RUSTORY_DISPLAY.
     pub output: Vec<String>,
-    /// Sound file paths queued via RUSTORY_PLAY_SOUND.
-    pub sound_commands: Vec<String>,
+    /// Sound commands queued via RUSTORY_PLAY_SOUND/PLAY_LOOP/STOP_SOUND.
+    pub sound_commands: Vec<SoundCommand>,
     /// Currently active character: (name, is_player).
     /// Set by RUSTORY_GET_PLAYER / RUSTORY_GET_NPC.
     active_character: Option<(String, bool)>,
@@ -185,6 +193,16 @@ impl ScriptContext {
         let c = ctx.clone();
         engine.register("RUSTORY_PLAY_SOUND", Some(1), move |args| {
             c.borrow_mut().rustory_play_sound(args)
+        });
+
+        let c = ctx.clone();
+        engine.register("RUSTORY_PLAY_LOOP", Some(1), move |args| {
+            c.borrow_mut().rustory_play_loop(args)
+        });
+
+        let c = ctx.clone();
+        engine.register("RUSTORY_STOP_SOUND", Some(0), move |args| {
+            c.borrow_mut().rustory_stop_sound(args)
         });
 
         // --- Input ---
@@ -647,10 +665,25 @@ impl ScriptContext {
     // --- Sound ---
 
     /// RUSTORY_PLAY_SOUND(filename) -> Noob
-    /// Queue a sound file for playback.
+    /// Queue a sound file for single playback.
     fn rustory_play_sound(&mut self, args: Vec<Value>) -> Value {
         let filename = value_to_string(&args[0]);
-        self.sound_commands.push(filename);
+        self.sound_commands.push(SoundCommand::Play(filename));
+        Value::Noob
+    }
+
+    /// RUSTORY_PLAY_LOOP(filename) -> Noob
+    /// Queue a sound file for looped playback.
+    fn rustory_play_loop(&mut self, args: Vec<Value>) -> Value {
+        let filename = value_to_string(&args[0]);
+        self.sound_commands.push(SoundCommand::PlayLoop(filename));
+        Value::Noob
+    }
+
+    /// RUSTORY_STOP_SOUND() -> Noob
+    /// Queue a stop-all-audio command.
+    fn rustory_stop_sound(&mut self, _args: Vec<Value>) -> Value {
+        self.sound_commands.push(SoundCommand::Stop);
         Value::Noob
     }
 
@@ -1306,7 +1339,7 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.rustory_play_sound(vec![Value::Yarn("tavern.mp3".to_string())]);
         assert_eq!(ctx.sound_commands.len(), 1);
-        assert_eq!(ctx.sound_commands[0], "tavern.mp3");
+        assert_eq!(ctx.sound_commands[0], SoundCommand::Play("tavern.mp3".to_string()));
     }
 
     #[test]
@@ -1314,6 +1347,48 @@ mod tests {
         let mut ctx = make_ctx();
         let result = ctx.rustory_play_sound(vec![Value::Yarn("battle.mp3".to_string())]);
         assert_eq!(result, Value::Noob);
+    }
+
+    #[test]
+    fn test_rustory_play_loop() {
+        let mut ctx = make_ctx();
+        ctx.rustory_play_loop(vec![Value::Yarn("ambiance.ogg".to_string())]);
+        assert_eq!(ctx.sound_commands.len(), 1);
+        assert_eq!(ctx.sound_commands[0], SoundCommand::PlayLoop("ambiance.ogg".to_string()));
+    }
+
+    #[test]
+    fn test_rustory_play_loop_returns_noob() {
+        let mut ctx = make_ctx();
+        let result = ctx.rustory_play_loop(vec![Value::Yarn("music.mp3".to_string())]);
+        assert_eq!(result, Value::Noob);
+    }
+
+    #[test]
+    fn test_rustory_stop_sound() {
+        let mut ctx = make_ctx();
+        ctx.rustory_stop_sound(vec![]);
+        assert_eq!(ctx.sound_commands.len(), 1);
+        assert_eq!(ctx.sound_commands[0], SoundCommand::Stop);
+    }
+
+    #[test]
+    fn test_rustory_stop_sound_returns_noob() {
+        let mut ctx = make_ctx();
+        let result = ctx.rustory_stop_sound(vec![]);
+        assert_eq!(result, Value::Noob);
+    }
+
+    #[test]
+    fn test_sound_commands_sequence() {
+        let mut ctx = make_ctx();
+        ctx.rustory_play_sound(vec![Value::Yarn("battle.mp3".to_string())]);
+        ctx.rustory_play_loop(vec![Value::Yarn("ambiance.ogg".to_string())]);
+        ctx.rustory_stop_sound(vec![]);
+        assert_eq!(ctx.sound_commands.len(), 3);
+        assert_eq!(ctx.sound_commands[0], SoundCommand::Play("battle.mp3".to_string()));
+        assert_eq!(ctx.sound_commands[1], SoundCommand::PlayLoop("ambiance.ogg".to_string()));
+        assert_eq!(ctx.sound_commands[2], SoundCommand::Stop);
     }
 
     // ---- Input ----
