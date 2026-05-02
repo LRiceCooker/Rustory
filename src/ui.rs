@@ -1,6 +1,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Position};
 use ratatui::style::Color;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::App;
@@ -26,8 +27,26 @@ pub fn render(frame: &mut Frame, app: &App) {
         );
     frame.render_widget(header, chunks[0]);
 
-    let main_area = Paragraph::new("")
-        .block(Block::default().borders(Borders::ALL));
+    // Build output history from messages
+    let lines: Vec<Line> = app
+        .messages
+        .iter()
+        .map(|msg| Line::from(Span::styled(msg.text.clone(), msg.style)))
+        .collect();
+
+    // Calculate scroll: auto-scroll to bottom
+    // Inner height = chunk height - 2 (borders)
+    let inner_height = chunks[1].height.saturating_sub(2) as usize;
+    let scroll = if lines.len() > inner_height {
+        (lines.len() - inner_height) as u16
+    } else {
+        0
+    };
+
+    let main_area = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
     frame.render_widget(main_area, chunks[1]);
 
     let input_text = format!("{}{}", PROMPT, app.input);
