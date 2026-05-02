@@ -1,0 +1,40 @@
+[system]
+name = "D&D 5e"
+version = "1.0"
+
+[stats.definition]
+abilities = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]
+derived = { ac = "10 + modifier(dexterity)", initiative = "modifier(dexterity)" }
+
+[character.schema]
+columns = ["name", "class", "level", "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma", "hp_max", "ac"]
+
+[inventory.schema]
+columns = ["item", "quantity", "weight", "notes"]
+
+[check.ability_check]
+roll = "1d20 + modifier({ability})"
+success = "result >= dc"
+
+[check.saving_throw]
+roll = "1d20 + modifier({ability})"
+success = "result >= dc"
+
+[modifier.advantage]
+type = "roll_modifier"
+effect = "take_best"
+target = "attack_roll"
+
+[modifier.disadvantage]
+type = "roll_modifier"
+effect = "take_worst"
+target = "attack_roll"
+
+[resources.hp]
+type = "gauge"
+max_stat = "hp_max"
+
+[resources.spell_slots]
+type = "pool"
+max = 4.0
+resets_on = "long_rest"
