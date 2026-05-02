@@ -104,7 +104,7 @@ pub fn dispatch(
         mapping::NEW => CommandResult::Error("new command must be handled by the app".to_string()),
         mapping::ROLL => roll_dice(args, rng),
         mapping::SEARCH => {
-            CommandResult::Error("search requires a loaded campaign (Phase 14)".to_string())
+            CommandResult::Error("search command must be handled by the app".to_string())
         }
         _ => {
             // Look up in custom commands HashMap

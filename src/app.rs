@@ -176,6 +176,10 @@ impl App {
             self.handle_new_command(args);
             return;
         }
+        if command == mapping::SEARCH {
+            self.handle_search_command(args);
+            return;
+        }
 
         // Hybrid dispatch: built-in first, then custom commands, then unknown
         let custom_commands = self
@@ -522,6 +526,59 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn handle_search_command(&mut self, args: &str) {
+        if args.trim().is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: search <query> (e.g. search goblin king)".to_string(),
+            ));
+            return;
+        }
+
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded. Use \"load <path>\" first.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let results = gs.search_index.search(args.trim(), 5);
+
+        if results.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                format!("No results found for \"{args}\"."),
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::new(
+            format!("Search results for \"{}\":", args.trim()),
+            Style::default().fg(Color::Blue),
+        )];
+
+        for (i, result) in results.iter().enumerate() {
+            lines.push(StyledLine::new(
+                format!("  {}. [{}]", i + 1, result.source),
+                Style::default().fg(Color::Cyan),
+            ));
+            // Truncate long passages
+            let passage = if result.passage.len() > 200 {
+                format!("{}...", &result.passage[..200])
+            } else {
+                result.passage.clone()
+            };
+            lines.push(StyledLine::new(
+                format!("     {passage}"),
+                Style::default().fg(Color::White),
+            ));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
     }
 
     fn history_prev(&mut self) {
@@ -1654,5 +1711,92 @@ mod tests {
         // "hel" should match built-in "help" first, not custom "helfire"
         app.input = "hel".to_string();
         assert_eq!(app.autocomplete_hint(), Some("p".to_string()));
+    }
+
+    // --- search command tests ---
+
+    #[test]
+    fn test_search_no_campaign_returns_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("search goblin");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("No campaign loaded")),
+            "Search without campaign should show error. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_no_query_returns_usage() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("search");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("Usage")),
+            "Search without query should show usage. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_returns_results_from_lore() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("search_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        // Create NPC with lore
+        std::fs::create_dir_all(campaign_dir.join("npc/dragon")).unwrap();
+        std::fs::write(
+            campaign_dir.join("npc/dragon/lore.md"),
+            "# Ancient Dragon\nThe ancient dragon sleeps beneath the frozen mountain.",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign_dir);
+        app.messages.clear();
+
+        app.dispatch_command("search ancient dragon");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("ancient dragon")
+                || t.contains("Ancient Dragon")
+                || t.contains("dragon")),
+            "Search should find content from lore. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_no_results_returns_message() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("empty_search");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign_dir);
+        app.messages.clear();
+
+        app.dispatch_command("search unicorn rainbow");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("No results")),
+            "Search with no matches should say no results. Messages: {output_texts:?}"
+        );
     }
 }

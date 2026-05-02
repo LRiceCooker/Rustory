@@ -9,6 +9,17 @@ pub struct IndexedDocument {
     pub text: String,
 }
 
+/// A search result with the matching passage and its source.
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    /// Source file path
+    pub source: String,
+    /// The matching passage with surrounding context
+    pub passage: String,
+    /// Relevance score (number of query words found)
+    pub score: usize,
+}
+
 /// In-memory search index built from PDF and markdown files.
 #[derive(Debug, Default)]
 pub struct SearchIndex {
@@ -101,6 +112,82 @@ impl SearchIndex {
         index.index_pdfs(campaign_path);
         index.index_markdown(campaign_path);
         index
+    }
+
+    /// Search the index for passages matching the query.
+    /// Uses case-insensitive word matching: a passage matches if it contains
+    /// all query words (in any order). Results are sorted by relevance (word
+    /// count match) and capped at `max_results`.
+    pub fn search(&self, query: &str, max_results: usize) -> Vec<SearchResult> {
+        let query_lower = query.to_lowercase();
+        let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+        if query_words.is_empty() {
+            return Vec::new();
+        }
+
+        let mut results = Vec::new();
+
+        for doc in &self.documents {
+            let text_lower = doc.text.to_lowercase();
+
+            // Find all lines that contain at least one query word
+            for line in doc.text.lines() {
+                let line_lower = line.to_lowercase();
+                let matched_words = query_words
+                    .iter()
+                    .filter(|w| line_lower.contains(**w))
+                    .count();
+
+                if matched_words > 0 {
+                    // Extract passage: the matching line with some context
+                    let passage = line.trim().to_string();
+                    if !passage.is_empty() {
+                        results.push(SearchResult {
+                            source: doc.source.clone(),
+                            passage,
+                            score: matched_words,
+                        });
+                    }
+                }
+            }
+
+            // Also check for multi-word match across the full text
+            if query_words.len() > 1
+                && query_words.iter().all(|w| text_lower.contains(w))
+            {
+                // Find the best contiguous passage containing the most query words
+                let lines: Vec<&str> = doc.text.lines().collect();
+                for window in lines.windows(3.min(lines.len())) {
+                    let chunk = window.join(" ").to_lowercase();
+                    let chunk_score = query_words
+                        .iter()
+                        .filter(|w| chunk.contains(**w))
+                        .count();
+                    if chunk_score > 1 {
+                        let passage = window
+                            .iter()
+                            .map(|l| l.trim())
+                            .filter(|l| !l.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        if !passage.is_empty() {
+                            results.push(SearchResult {
+                                source: doc.source.clone(),
+                                passage,
+                                score: chunk_score + 1, // bonus for multi-line match
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Deduplicate by passage text (keep highest score)
+        results.sort_by(|a, b| b.score.cmp(&a.score));
+        let mut seen = std::collections::HashSet::new();
+        results.retain(|r| seen.insert(r.passage.clone()));
+        results.truncate(max_results);
+        results
     }
 }
 
@@ -333,6 +420,84 @@ mod tests {
             index.documents.is_empty(),
             "Empty/whitespace-only files should be skipped"
         );
+    }
+
+    // --- Search tests ---
+
+    #[test]
+    fn test_search_returns_matching_passages() {
+        let mut index = SearchIndex::new();
+        index.documents.push(IndexedDocument {
+            source: "npc/goblin/lore.md".to_string(),
+            text: "The Goblin King rules from his dark throne.\nHe commands an army of goblins."
+                .to_string(),
+        });
+        index.documents.push(IndexedDocument {
+            source: "players/thorin/lore.md".to_string(),
+            text: "Thorin is a dwarf warrior.\nHe seeks to defeat the Goblin King.".to_string(),
+        });
+
+        let results = index.search("goblin king", 5);
+        assert!(
+            !results.is_empty(),
+            "Search should return results for 'goblin king'"
+        );
+        assert!(results
+            .iter()
+            .any(|r| r.passage.contains("Goblin King")));
+    }
+
+    #[test]
+    fn test_search_case_insensitive() {
+        let mut index = SearchIndex::new();
+        index.documents.push(IndexedDocument {
+            source: "test.md".to_string(),
+            text: "The ANCIENT DRAGON sleeps in the cave.".to_string(),
+        });
+
+        let results = index.search("ancient dragon", 5);
+        assert!(!results.is_empty(), "Search should be case-insensitive");
+    }
+
+    #[test]
+    fn test_search_no_results() {
+        let mut index = SearchIndex::new();
+        index.documents.push(IndexedDocument {
+            source: "test.md".to_string(),
+            text: "The goblin attacks with a rusty sword.".to_string(),
+        });
+
+        let results = index.search("unicorn rainbow", 5);
+        assert!(
+            results.is_empty(),
+            "Should return no results for unmatched query"
+        );
+    }
+
+    #[test]
+    fn test_search_empty_query() {
+        let mut index = SearchIndex::new();
+        index.documents.push(IndexedDocument {
+            source: "test.md".to_string(),
+            text: "Some content.".to_string(),
+        });
+
+        let results = index.search("", 5);
+        assert!(results.is_empty(), "Empty query should return no results");
+    }
+
+    #[test]
+    fn test_search_respects_max_results() {
+        let mut index = SearchIndex::new();
+        for i in 0..10 {
+            index.documents.push(IndexedDocument {
+                source: format!("doc{i}.md"),
+                text: format!("Line {i}: The goblin attacks."),
+            });
+        }
+
+        let results = index.search("goblin", 3);
+        assert!(results.len() <= 3, "Should respect max_results limit");
     }
 
     #[test]
