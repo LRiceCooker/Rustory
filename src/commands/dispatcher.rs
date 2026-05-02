@@ -1,15 +1,19 @@
+use std::collections::HashMap;
+
 use rand::Rng;
 use rand::RngCore;
 use ratatui::style::{Color, Style};
 
 use super::mapping;
 use super::parsers::roll;
+use crate::scripting::loader::LolScript;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandResult {
     Output(Vec<StyledLine>),
     Error(String),
     Quit,
+    Custom(LolScript),
     Unknown(String),
 }
 
@@ -81,11 +85,16 @@ fn roll_dice(args: &str, rng: &mut dyn RngCore) -> CommandResult {
     }
 }
 
-pub fn dispatch(input: &str, rng: &mut dyn RngCore) -> CommandResult {
+pub fn dispatch(
+    input: &str,
+    rng: &mut dyn RngCore,
+    custom_commands: Option<&HashMap<String, LolScript>>,
+) -> CommandResult {
     let parts: Vec<&str> = input.splitn(2, ' ').collect();
     let command = parts[0];
     let args = parts.get(1).unwrap_or(&"");
 
+    // Built-in commands ALWAYS take priority (security)
     match command {
         mapping::QUIT => CommandResult::Quit,
         mapping::HELP => help(),
@@ -94,7 +103,18 @@ pub fn dispatch(input: &str, rng: &mut dyn RngCore) -> CommandResult {
         }
         mapping::NEW => CommandResult::Error("new command must be handled by the app".to_string()),
         mapping::ROLL => roll_dice(args, rng),
-        _ => CommandResult::Unknown(command.to_string()),
+        mapping::SEARCH => {
+            CommandResult::Error("search requires a loaded campaign (Phase 14)".to_string())
+        }
+        _ => {
+            // Look up in custom commands HashMap
+            if let Some(commands) = custom_commands {
+                if let Some(script) = commands.get(&command.to_lowercase()) {
+                    return CommandResult::Custom(script.clone());
+                }
+            }
+            CommandResult::Unknown(command.to_string())
+        }
     }
 }
 
@@ -108,12 +128,15 @@ mod tests {
 
     #[test]
     fn test_quit_returns_quit() {
-        assert_eq!(dispatch("quit", &mut *test_rng()), CommandResult::Quit);
+        assert_eq!(
+            dispatch("quit", &mut *test_rng(), None),
+            CommandResult::Quit
+        );
     }
 
     #[test]
     fn test_help_returns_output() {
-        match dispatch("help", &mut *test_rng()) {
+        match dispatch("help", &mut *test_rng(), None) {
             CommandResult::Output(lines) => {
                 assert!(lines.len() >= 4);
                 assert!(lines[0].text.contains("Available commands"));
@@ -127,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_unknown_command_returns_unknown() {
-        match dispatch("foobar", &mut *test_rng()) {
+        match dispatch("foobar", &mut *test_rng(), None) {
             CommandResult::Unknown(cmd) => assert_eq!(cmd, "foobar"),
             other => panic!("expected Unknown, got {other:?}"),
         }
@@ -135,7 +158,7 @@ mod tests {
 
     #[test]
     fn test_roll_valid() {
-        match dispatch("roll 2d6", &mut *test_rng()) {
+        match dispatch("roll 2d6", &mut *test_rng(), None) {
             CommandResult::Output(lines) => {
                 assert!(lines[0].text.contains("2 dice(s)"));
                 assert!(lines[0].text.contains("maximum value: 6"));
@@ -148,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_roll_no_args() {
-        match dispatch("roll", &mut *test_rng()) {
+        match dispatch("roll", &mut *test_rng(), None) {
             CommandResult::Error(msg) => assert!(msg.contains("Usage")),
             other => panic!("expected Error, got {other:?}"),
         }
@@ -156,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_roll_invalid() {
-        match dispatch("roll abc", &mut *test_rng()) {
+        match dispatch("roll abc", &mut *test_rng(), None) {
             CommandResult::Error(msg) => assert!(!msg.is_empty()),
             other => panic!("expected Error, got {other:?}"),
         }
@@ -170,8 +193,8 @@ mod tests {
         let mut rng1 = StdRng::seed_from_u64(42);
         let mut rng2 = StdRng::seed_from_u64(42);
 
-        let result1 = dispatch("roll 3d6", &mut rng1);
-        let result2 = dispatch("roll 3d6", &mut rng2);
+        let result1 = dispatch("roll 3d6", &mut rng1, None);
+        let result2 = dispatch("roll 3d6", &mut rng2, None);
 
         assert_eq!(result1, result2);
     }
@@ -184,10 +207,130 @@ mod tests {
         let mut rng1 = StdRng::seed_from_u64(42);
         let mut rng2 = StdRng::seed_from_u64(99);
 
-        let result1 = dispatch("roll 3d20", &mut rng1);
-        let result2 = dispatch("roll 3d20", &mut rng2);
+        let result1 = dispatch("roll 3d20", &mut rng1, None);
+        let result2 = dispatch("roll 3d20", &mut rng2, None);
 
         // Very unlikely to be equal with different seeds and 3d20
         assert_ne!(result1, result2);
+    }
+
+    // --- Hybrid dispatch tests ---
+
+    #[test]
+    fn test_builtin_command_executes() {
+        // Built-in commands work regardless of custom commands
+        let mut customs = HashMap::new();
+        customs.insert(
+            "greet".to_string(),
+            LolScript {
+                name: "greet".to_string(),
+                source: "HAI 1.2\nKTHXBYE".to_string(),
+            },
+        );
+
+        match dispatch("roll 1d6", &mut *test_rng(), Some(&customs)) {
+            CommandResult::Output(lines) => {
+                assert!(lines[0].text.contains("1 dice(s)"));
+            }
+            other => panic!("expected Output for built-in, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_custom_command_returns_custom() {
+        let mut customs = HashMap::new();
+        customs.insert(
+            "smite".to_string(),
+            LolScript {
+                name: "smite".to_string(),
+                source: "HAI 1.2\nVISIBLE \"smite!\"\nKTHXBYE".to_string(),
+            },
+        );
+
+        match dispatch("smite", &mut *test_rng(), Some(&customs)) {
+            CommandResult::Custom(script) => {
+                assert_eq!(script.name, "smite");
+                assert!(script.source.contains("smite!"));
+            }
+            other => panic!("expected Custom, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_builtin_wins_over_same_name_custom() {
+        let mut customs = HashMap::new();
+        // Create a custom command with the same name as a built-in
+        customs.insert(
+            "help".to_string(),
+            LolScript {
+                name: "help".to_string(),
+                source: "HAI 1.2\nVISIBLE \"evil help\"\nKTHXBYE".to_string(),
+            },
+        );
+
+        match dispatch("help", &mut *test_rng(), Some(&customs)) {
+            CommandResult::Output(lines) => {
+                assert!(lines[0].text.contains("Available commands"));
+            }
+            other => panic!("expected built-in Output, got {other:?}"),
+        }
+
+        // Also test other built-ins: quit, roll, load, new, search
+        assert_eq!(
+            dispatch("quit", &mut *test_rng(), Some(&customs)),
+            CommandResult::Quit
+        );
+    }
+
+    #[test]
+    fn test_unknown_command_with_custom_commands_present() {
+        let mut customs = HashMap::new();
+        customs.insert(
+            "smite".to_string(),
+            LolScript {
+                name: "smite".to_string(),
+                source: "HAI 1.2\nKTHXBYE".to_string(),
+            },
+        );
+
+        // "foobar" is neither built-in nor custom
+        match dispatch("foobar", &mut *test_rng(), Some(&customs)) {
+            CommandResult::Unknown(cmd) => assert_eq!(cmd, "foobar"),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_unknown_command_without_custom_commands() {
+        match dispatch("smite", &mut *test_rng(), None) {
+            CommandResult::Unknown(cmd) => assert_eq!(cmd, "smite"),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_custom_command_case_insensitive() {
+        let mut customs = HashMap::new();
+        customs.insert(
+            "smite".to_string(),
+            LolScript {
+                name: "smite".to_string(),
+                source: "HAI 1.2\nKTHXBYE".to_string(),
+            },
+        );
+
+        // Input "SMITE" should match "smite" in customs (lowercased lookup)
+        match dispatch("SMITE", &mut *test_rng(), Some(&customs)) {
+            CommandResult::Custom(script) => assert_eq!(script.name, "smite"),
+            other => panic!("expected Custom, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_search_placeholder() {
+        match dispatch("search goblin", &mut *test_rng(), None) {
+            CommandResult::Error(msg) => assert!(msg.contains("search")),
+            other => panic!("expected Error for search placeholder, got {other:?}"),
+        }
     }
 }

@@ -177,21 +177,17 @@ impl App {
             return;
         }
 
-        // Dispatch via the stateless dispatcher
-        let result = dispatcher::dispatch(input, &mut self.rng);
+        // Hybrid dispatch: built-in first, then custom commands, then unknown
+        let custom_commands = self
+            .game_state
+            .as_ref()
+            .map(|gs| &gs.custom_commands);
+        let result = dispatcher::dispatch(input, &mut self.rng, custom_commands);
 
-        // If unknown, try custom commands from the loaded campaign
-        if let CommandResult::Unknown(ref cmd) = result {
-            let custom_script = self
-                .game_state
-                .as_ref()
-                .and_then(|gs| gs.custom_commands.get(&cmd.to_lowercase()))
-                .cloned();
-
-            if let Some(script) = custom_script {
-                self.execute_custom_command(&script);
-                return;
-            }
+        if let CommandResult::Custom(ref script) = result {
+            let script = script.clone();
+            self.execute_custom_command(&script);
+            return;
         }
 
         self.apply_command_result(result);
@@ -270,6 +266,10 @@ impl App {
                     text: format!("Unknown command: \"{cmd}\". Type \"help\" for a list."),
                     style: Style::default().fg(Color::Red),
                 });
+            }
+            CommandResult::Custom(_) => {
+                // Custom commands are handled before apply_command_result
+                unreachable!("Custom variant should be handled before apply_command_result");
             }
         }
     }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// A loaded LOLCODE script representing a custom command.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LolScript {
     /// Command name (filename without extension, lowercased)
     pub name: String,
