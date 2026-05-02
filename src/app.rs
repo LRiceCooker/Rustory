@@ -1,7 +1,15 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::style::{Color, Style};
 use ratatui::DefaultTerminal;
 
+use crate::commands::dispatcher::{self, CommandResult};
 use crate::ui;
+
+#[derive(Debug, Clone)]
+pub struct Message {
+    pub text: String,
+    pub style: Style,
+}
 
 #[derive(Debug, Default)]
 pub struct App {
@@ -9,6 +17,7 @@ pub struct App {
     pub input: String,
     pub cursor_position: usize,
     pub last_command: Option<String>,
+    pub messages: Vec<Message>,
 }
 
 impl App {
@@ -18,6 +27,7 @@ impl App {
             input: String::new(),
             cursor_position: 0,
             last_command: None,
+            messages: Vec::new(),
         }
     }
 
@@ -56,9 +66,48 @@ impl App {
 
     fn submit_input(&mut self) {
         let input = self.input.trim().to_string();
-        if !input.is_empty() {
-            self.last_command = Some(input);
+        if input.is_empty() {
+            self.input.clear();
+            self.cursor_position = 0;
+            return;
         }
+
+        self.last_command = Some(input.clone());
+
+        // Echo the command in DarkGray
+        self.messages.push(Message {
+            text: format!("> {}", input),
+            style: Style::default().fg(Color::DarkGray),
+        });
+
+        // Dispatch and handle the result
+        let result = dispatcher::dispatch(&input);
+        match result {
+            CommandResult::Output(lines) => {
+                for line in lines {
+                    self.messages.push(Message {
+                        text: line.text,
+                        style: line.style,
+                    });
+                }
+            }
+            CommandResult::Error(msg) => {
+                self.messages.push(Message {
+                    text: msg,
+                    style: Style::default().fg(Color::Red),
+                });
+            }
+            CommandResult::Quit => {
+                self.running = false;
+            }
+            CommandResult::Unknown(cmd) => {
+                self.messages.push(Message {
+                    text: format!("Unknown command: \"{}\". Type \"help\" for a list.", cmd),
+                    style: Style::default().fg(Color::Red),
+                });
+            }
+        }
+
         self.input.clear();
         self.cursor_position = 0;
     }
@@ -272,5 +321,40 @@ mod tests {
         app.on_key(KeyEvent::from(KeyCode::Char('q')));
         assert!(app.running);
         assert_eq!(app.input, "q");
+    }
+
+    #[test]
+    fn test_quit_command_stops_app() {
+        let mut app = App::new();
+        app.running = true;
+        app.input = "quit".to_string();
+        app.cursor_position = 4;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert!(!app.running);
+    }
+
+    #[test]
+    fn test_unknown_command_adds_error_message() {
+        let mut app = App::new();
+        app.running = true;
+        app.input = "foobar".to_string();
+        app.cursor_position = 6;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert!(app.running);
+        // Echo + error = 2 messages
+        assert_eq!(app.messages.len(), 2);
+        assert!(app.messages[1].text.contains("Unknown command"));
+    }
+
+    #[test]
+    fn test_help_command_adds_output_messages() {
+        let mut app = App::new();
+        app.running = true;
+        app.input = "help".to_string();
+        app.cursor_position = 4;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert!(app.running);
+        // Echo + at least 1 output line
+        assert!(app.messages.len() >= 2);
     }
 }

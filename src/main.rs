@@ -1,4 +1,5 @@
 mod app;
+mod commands;
 mod ui;
 
 fn main() -> color_eyre::Result<()> {
