@@ -89,7 +89,7 @@ impl App {
 
         // Echo the command in DarkGray
         self.messages.push(Message {
-            text: format!("> {}", input),
+            text: format!("> {input}"),
             style: Style::default().fg(Color::DarkGray),
         });
 
@@ -115,7 +115,7 @@ impl App {
             }
             CommandResult::Unknown(cmd) => {
                 self.messages.push(Message {
-                    text: format!("Unknown command: \"{}\". Type \"help\" for a list.", cmd),
+                    text: format!("Unknown command: \"{cmd}\". Type \"help\" for a list."),
                     style: Style::default().fg(Color::Red),
                 });
             }

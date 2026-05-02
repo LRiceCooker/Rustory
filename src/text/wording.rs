@@ -2,20 +2,22 @@ use std::fs;
 use std::path::Path;
 use toml::Value;
 
+#[allow(dead_code)]
 pub fn load(path: &Path) -> Result<Value, String> {
     let content = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read wording file {}: {}", path.display(), e))?;
+        .map_err(|e| format!("Failed to read wording file {}: {e}", path.display()))?;
     content
         .parse::<Value>()
-        .map_err(|e| format!("Failed to parse wording file {}: {}", path.display(), e))
+        .map_err(|e| format!("Failed to parse wording file {}: {e}", path.display()))
 }
 
+#[allow(dead_code)]
 pub fn get<'a>(wording: &'a Value, section: &str, key: &str) -> Result<&'a str, String> {
     wording
         .get(section)
         .and_then(|s| s.get(key))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Missing wording key: {}.{}", section, key))
+        .ok_or_else(|| format!("Missing wording key: {section}.{key}"))
 }
 
 #[cfg(test)]

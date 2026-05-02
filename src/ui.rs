@@ -19,14 +19,13 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(frame.area());
 
     let locale = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
-    let header = Paragraph::new("")
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Rustory")
-                .title_style(Color::Cyan)
-                .title_top(Line::from(locale).right_aligned()),
-        );
+    let header = Paragraph::new("").block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Rustory")
+            .title_style(Color::Cyan)
+            .title_top(Line::from(locale).right_aligned()),
+    );
     frame.render_widget(header, chunks[0]);
 
     // Build output history from messages
@@ -51,15 +50,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         .scroll((scroll, 0));
     frame.render_widget(main_area, chunks[1]);
 
-    let mut input_spans = vec![
-        Span::raw(PROMPT.to_string()),
-        Span::raw(app.input.clone()),
-    ];
+    let mut input_spans = vec![Span::raw(PROMPT.to_string()), Span::raw(app.input.clone())];
     if let Some(hint) = app.autocomplete_hint() {
         input_spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     }
-    let input_bar = Paragraph::new(Line::from(input_spans))
-        .block(Block::default().borders(Borders::ALL));
+    let input_bar =
+        Paragraph::new(Line::from(input_spans)).block(Block::default().borders(Borders::ALL));
     frame.render_widget(input_bar, chunks[2]);
 
     // Position cursor after the prompt + user's cursor position

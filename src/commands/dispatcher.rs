@@ -70,10 +70,7 @@ fn roll_dice(args: &str) -> CommandResult {
                     "{} dice(s), maximum value: {}, modifier: {}",
                     parsed.dice, parsed.value, mod_str
                 )),
-                StyledLine::plain(format!(
-                    "natural: {:?}, result: {}",
-                    naturals, total
-                )),
+                StyledLine::plain(format!("natural: {naturals:?}, result: {total}")),
             ])
         }
         Err(e) => CommandResult::Error(e),

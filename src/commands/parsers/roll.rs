@@ -14,7 +14,9 @@ pub fn parse(input: &str) -> Result<Roll, String> {
     // Split on 'd' to get dice count and the rest
     let parts: Vec<&str> = input.splitn(2, 'd').collect();
     if parts.len() != 2 {
-        return Err(format!("Invalid roll format: \"{}\". Expected format: NdV or NdV+M", input));
+        return Err(format!(
+            "Invalid roll format: \"{input}\". Expected format: NdV or NdV+M"
+        ));
     }
 
     let dice: u32 = parts[0]
@@ -42,7 +44,7 @@ pub fn parse(input: &str) -> Result<Roll, String> {
         let (v, m) = right.split_at(pos);
         let mod_val: i32 = m
             .parse()
-            .map_err(|_| format!("Invalid modifier: \"{}\"", m))?;
+            .map_err(|_| format!("Invalid modifier: \"{m}\""))?;
         (v, mod_val)
     } else {
         (right, 0)
@@ -50,13 +52,17 @@ pub fn parse(input: &str) -> Result<Roll, String> {
 
     let value: u32 = value_str
         .parse()
-        .map_err(|_| format!("Invalid die value: \"{}\"", value_str))?;
+        .map_err(|_| format!("Invalid die value: \"{value_str}\""))?;
 
     if value == 0 {
         return Err("Die value must be at least 1".to_string());
     }
 
-    Ok(Roll { dice, value, modifier })
+    Ok(Roll {
+        dice,
+        value,
+        modifier,
+    })
 }
 
 #[cfg(test)]
@@ -67,7 +73,11 @@ mod tests {
     fn test_parse_simple() {
         assert_eq!(
             parse("2d6").unwrap(),
-            Roll { dice: 2, value: 6, modifier: 0 }
+            Roll {
+                dice: 2,
+                value: 6,
+                modifier: 0
+            }
         );
     }
 
@@ -75,7 +85,11 @@ mod tests {
     fn test_parse_with_positive_modifier() {
         assert_eq!(
             parse("1d20+3").unwrap(),
-            Roll { dice: 1, value: 20, modifier: 3 }
+            Roll {
+                dice: 1,
+                value: 20,
+                modifier: 3
+            }
         );
     }
 
@@ -83,7 +97,11 @@ mod tests {
     fn test_parse_with_negative_modifier() {
         assert_eq!(
             parse("3d8-2").unwrap(),
-            Roll { dice: 3, value: 8, modifier: -2 }
+            Roll {
+                dice: 3,
+                value: 8,
+                modifier: -2
+            }
         );
     }
 
@@ -116,7 +134,11 @@ mod tests {
     fn test_parse_single_die() {
         assert_eq!(
             parse("1d100").unwrap(),
-            Roll { dice: 1, value: 100, modifier: 0 }
+            Roll {
+                dice: 1,
+                value: 100,
+                modifier: 0
+            }
         );
     }
 
@@ -130,7 +152,11 @@ mod tests {
     fn test_parse_negative_modifier() {
         assert_eq!(
             parse("1d20-5").unwrap(),
-            Roll { dice: 1, value: 20, modifier: -5 }
+            Roll {
+                dice: 1,
+                value: 20,
+                modifier: -5
+            }
         );
     }
 }
