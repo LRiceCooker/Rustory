@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::Path;
 
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
@@ -16,6 +18,13 @@ impl TestHarness {
     /// Create a new test harness with a fresh App
     pub fn new() -> Self {
         let mut app = App::new();
+        app.running = true;
+        Self { app }
+    }
+
+    /// Create a new test harness with a seeded RNG for deterministic tests
+    pub fn with_seed(seed: u64) -> Self {
+        let mut app = App::with_rng(Box::new(StdRng::seed_from_u64(seed)));
         app.running = true;
         Self { app }
     }
@@ -210,6 +219,15 @@ mod tests {
         assert!(campaign.path().join("npc/goblin/sheet.csv").exists());
         assert!(campaign.path().join("npc/townspeople.csv").exists());
         assert!(campaign.path().join("rules/commands/smite.lol").exists());
+    }
+
+    #[test]
+    fn test_harness_with_seed_deterministic() {
+        let mut h1 = TestHarness::with_seed(42);
+        let mut h2 = TestHarness::with_seed(42);
+        h1.execute("roll 3d6");
+        h2.execute("roll 3d6");
+        assert_eq!(h1.last_output(), h2.last_output());
     }
 
     #[test]

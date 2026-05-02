@@ -1,4 +1,5 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use rand::RngCore;
 use ratatui::style::{Color, Style};
 use ratatui::DefaultTerminal;
 
@@ -11,7 +12,6 @@ pub struct Message {
     pub style: Style,
 }
 
-#[derive(Debug, Default)]
 pub struct App {
     pub running: bool,
     pub input: String,
@@ -21,10 +21,15 @@ pub struct App {
     pub command_history: Vec<String>,
     pub history_index: Option<usize>,
     pub scroll_offset: u16,
+    pub rng: Box<dyn RngCore>,
 }
 
 impl App {
     pub fn new() -> Self {
+        Self::with_rng(Box::new(rand::thread_rng()))
+    }
+
+    pub fn with_rng(rng: Box<dyn RngCore>) -> Self {
         Self {
             running: false,
             input: String::new(),
@@ -34,6 +39,7 @@ impl App {
             command_history: Vec::new(),
             history_index: None,
             scroll_offset: 0,
+            rng,
         }
     }
 
@@ -101,7 +107,7 @@ impl App {
         });
 
         // Dispatch and handle the result
-        let result = dispatcher::dispatch(input);
+        let result = dispatcher::dispatch(input, &mut self.rng);
         match result {
             CommandResult::Output(lines) => {
                 for line in lines {

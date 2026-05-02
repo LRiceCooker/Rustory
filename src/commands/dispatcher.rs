@@ -1,4 +1,5 @@
 use rand::Rng;
+use rand::RngCore;
 use ratatui::style::{Color, Style};
 
 use super::mapping;
@@ -40,7 +41,7 @@ fn help() -> CommandResult {
     ])
 }
 
-fn roll_dice(args: &str) -> CommandResult {
+fn roll_dice(args: &str, rng: &mut dyn RngCore) -> CommandResult {
     let args = args.trim();
     if args.is_empty() {
         return CommandResult::Error("Usage: roll <NdV+M> (e.g. roll 2d6+3)".to_string());
@@ -48,7 +49,6 @@ fn roll_dice(args: &str) -> CommandResult {
 
     match roll::parse(args) {
         Ok(parsed) => {
-            let mut rng = rand::thread_rng();
             let mut naturals: Vec<u32> = Vec::new();
             for _ in 0..parsed.dice {
                 let result = rng.gen_range(1..=parsed.value);
@@ -77,7 +77,7 @@ fn roll_dice(args: &str) -> CommandResult {
     }
 }
 
-pub fn dispatch(input: &str) -> CommandResult {
+pub fn dispatch(input: &str, rng: &mut dyn RngCore) -> CommandResult {
     let parts: Vec<&str> = input.splitn(2, ' ').collect();
     let command = parts[0];
     let args = parts.get(1).unwrap_or(&"");
@@ -85,7 +85,7 @@ pub fn dispatch(input: &str) -> CommandResult {
     match command {
         mapping::QUIT => CommandResult::Quit,
         mapping::HELP => help(),
-        mapping::ROLL => roll_dice(args),
+        mapping::ROLL => roll_dice(args, rng),
         _ => CommandResult::Unknown(command.to_string()),
     }
 }
@@ -94,14 +94,18 @@ pub fn dispatch(input: &str) -> CommandResult {
 mod tests {
     use super::*;
 
+    fn test_rng() -> Box<dyn RngCore> {
+        Box::new(rand::thread_rng())
+    }
+
     #[test]
     fn test_quit_returns_quit() {
-        assert_eq!(dispatch("quit"), CommandResult::Quit);
+        assert_eq!(dispatch("quit", &mut *test_rng()), CommandResult::Quit);
     }
 
     #[test]
     fn test_help_returns_output() {
-        match dispatch("help") {
+        match dispatch("help", &mut *test_rng()) {
             CommandResult::Output(lines) => {
                 assert!(lines.len() >= 4);
                 assert!(lines[0].text.contains("Available commands"));
@@ -109,44 +113,73 @@ mod tests {
                 assert!(lines.iter().any(|l| l.text.contains("roll")));
                 assert!(lines.iter().any(|l| l.text.contains("quit")));
             }
-            other => panic!("expected Output, got {:?}", other),
+            other => panic!("expected Output, got {other:?}"),
         }
     }
 
     #[test]
     fn test_unknown_command_returns_unknown() {
-        match dispatch("foobar") {
+        match dispatch("foobar", &mut *test_rng()) {
             CommandResult::Unknown(cmd) => assert_eq!(cmd, "foobar"),
-            other => panic!("expected Unknown, got {:?}", other),
+            other => panic!("expected Unknown, got {other:?}"),
         }
     }
 
     #[test]
     fn test_roll_valid() {
-        match dispatch("roll 2d6") {
+        match dispatch("roll 2d6", &mut *test_rng()) {
             CommandResult::Output(lines) => {
                 assert!(lines[0].text.contains("2 dice(s)"));
                 assert!(lines[0].text.contains("maximum value: 6"));
                 assert!(lines[1].text.contains("natural:"));
                 assert!(lines[1].text.contains("result:"));
             }
-            other => panic!("expected Output, got {:?}", other),
+            other => panic!("expected Output, got {other:?}"),
         }
     }
 
     #[test]
     fn test_roll_no_args() {
-        match dispatch("roll") {
+        match dispatch("roll", &mut *test_rng()) {
             CommandResult::Error(msg) => assert!(msg.contains("Usage")),
-            other => panic!("expected Error, got {:?}", other),
+            other => panic!("expected Error, got {other:?}"),
         }
     }
 
     #[test]
     fn test_roll_invalid() {
-        match dispatch("roll abc") {
+        match dispatch("roll abc", &mut *test_rng()) {
             CommandResult::Error(msg) => assert!(!msg.is_empty()),
-            other => panic!("expected Error, got {:?}", other),
+            other => panic!("expected Error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_roll_deterministic_same_seed() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(42);
+
+        let result1 = dispatch("roll 3d6", &mut rng1);
+        let result2 = dispatch("roll 3d6", &mut rng2);
+
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_roll_deterministic_different_seeds() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(99);
+
+        let result1 = dispatch("roll 3d20", &mut rng1);
+        let result2 = dispatch("roll 3d20", &mut rng2);
+
+        // Very unlikely to be equal with different seeds and 3d20
+        assert_ne!(result1, result2);
     }
 }
