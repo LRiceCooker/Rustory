@@ -57,6 +57,51 @@ impl SearchIndex {
             }
         }
     }
+    /// Index all markdown files from the campaign: lore.md and dialogues.md
+    /// from player and NPC folders. Missing directories are handled gracefully.
+    pub fn index_markdown(&mut self, campaign_path: &Path) {
+        for subdir in &["players", "npc"] {
+            let dir = campaign_path.join(subdir);
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+
+                for md_file in &["lore.md", "dialogues.md"] {
+                    let md_path = path.join(md_file);
+                    if md_path.is_file() {
+                        if let Ok(text) = std::fs::read_to_string(&md_path) {
+                            if !text.trim().is_empty() {
+                                let relative = md_path
+                                    .strip_prefix(campaign_path)
+                                    .unwrap_or(&md_path)
+                                    .to_string_lossy()
+                                    .to_string();
+                                self.documents.push(IndexedDocument {
+                                    source: relative,
+                                    text,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Build the full index from a campaign path: PDFs + markdown.
+    pub fn build(campaign_path: &Path) -> Self {
+        let mut index = Self::new();
+        index.index_pdfs(campaign_path);
+        index.index_markdown(campaign_path);
+        index
+    }
 }
 
 /// Extract text from a PDF file using pdf-extract.
@@ -219,5 +264,108 @@ mod tests {
     fn test_extract_pdf_nonexistent_file() {
         let result = extract_pdf_text(Path::new("/nonexistent/file.pdf"));
         assert!(result.is_err(), "Nonexistent file should return error");
+    }
+
+    // --- Markdown indexing tests ---
+
+    #[test]
+    fn test_index_markdown_from_campaign() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // Create player with lore
+        let player_dir = dir.path().join("players").join("thorin");
+        std::fs::create_dir_all(&player_dir).unwrap();
+        std::fs::write(
+            player_dir.join("lore.md"),
+            "# Thorin\nA dwarf warrior from the Iron Hills.",
+        )
+        .unwrap();
+
+        // Create NPC with lore and dialogues
+        let npc_dir = dir.path().join("npc").join("goblin_king");
+        std::fs::create_dir_all(&npc_dir).unwrap();
+        std::fs::write(
+            npc_dir.join("lore.md"),
+            "# Goblin King\nRules from his dark throne in the mountain.",
+        )
+        .unwrap();
+        std::fs::write(
+            npc_dir.join("dialogues.md"),
+            "# Dialogues\n\"You dare enter my domain?\"",
+        )
+        .unwrap();
+
+        let mut index = SearchIndex::new();
+        index.index_markdown(dir.path());
+
+        assert_eq!(
+            index.documents.len(),
+            3,
+            "Should index 3 markdown files (1 player lore + 1 NPC lore + 1 NPC dialogues)"
+        );
+
+        let sources: Vec<&str> = index.documents.iter().map(|d| d.source.as_str()).collect();
+        assert!(sources.iter().any(|s| s.contains("thorin") && s.contains("lore.md")));
+        assert!(sources.iter().any(|s| s.contains("goblin_king") && s.contains("lore.md")));
+        assert!(sources.iter().any(|s| s.contains("goblin_king") && s.contains("dialogues.md")));
+    }
+
+    #[test]
+    fn test_index_markdown_missing_directories() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // No players/ or npc/ directories
+        let mut index = SearchIndex::new();
+        index.index_markdown(dir.path());
+        assert!(index.documents.is_empty());
+    }
+
+    #[test]
+    fn test_index_markdown_empty_files_skipped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let player_dir = dir.path().join("players").join("empty");
+        std::fs::create_dir_all(&player_dir).unwrap();
+        std::fs::write(player_dir.join("lore.md"), "").unwrap();
+        std::fs::write(player_dir.join("dialogues.md"), "  \n  ").unwrap();
+
+        let mut index = SearchIndex::new();
+        index.index_markdown(dir.path());
+        assert!(
+            index.documents.is_empty(),
+            "Empty/whitespace-only files should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_build_indexes_both_pdfs_and_markdown() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // Add a PDF
+        let docs_dir = dir.path().join("rules").join("docs");
+        std::fs::create_dir_all(&docs_dir).unwrap();
+        std::fs::write(
+            docs_dir.join("rules.pdf"),
+            create_test_pdf("Combat rules for the brave"),
+        )
+        .unwrap();
+
+        // Add a markdown lore file
+        let npc_dir = dir.path().join("npc").join("dragon");
+        std::fs::create_dir_all(&npc_dir).unwrap();
+        std::fs::write(
+            npc_dir.join("lore.md"),
+            "# Ancient Dragon\nSleeps beneath the mountain.",
+        )
+        .unwrap();
+
+        let index = SearchIndex::build(dir.path());
+
+        assert_eq!(
+            index.documents.len(),
+            2,
+            "Should index 1 PDF + 1 markdown"
+        );
+        let sources: Vec<&str> = index.documents.iter().map(|d| d.source.as_str()).collect();
+        assert!(sources.iter().any(|s| s.contains("rules.pdf")));
+        assert!(sources.iter().any(|s| s.contains("lore.md")));
     }
 }
