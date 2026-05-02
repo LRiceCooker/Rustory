@@ -5,11 +5,12 @@ pub const NEW: &str = "new";
 pub const QUIT: &str = "quit";
 pub const ROLL: &str = "roll";
 pub const SEARCH: &str = "search";
+pub const HISTORY: &str = "history";
 pub const REDO: &str = "redo";
 pub const SOUND: &str = "sound";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
 
-pub const COMMANDS: [&str; 11] = [
-    HELP, LOAD, MAP, NEW, QUIT, REDO, ROLL, SEARCH, SOUND, UNDO, VALIDATE,
+pub const COMMANDS: [&str; 12] = [
+    HELP, HISTORY, LOAD, MAP, NEW, QUIT, REDO, ROLL, SEARCH, SOUND, UNDO, VALIDATE,
 ];

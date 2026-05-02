@@ -113,6 +113,9 @@ pub fn dispatch(
         mapping::SOUND => {
             CommandResult::Error("sound command must be handled by the app".to_string())
         }
+        mapping::HISTORY => {
+            CommandResult::Error("history command must be handled by the app".to_string())
+        }
         mapping::UNDO => {
             CommandResult::Error("undo command must be handled by the app".to_string())
         }

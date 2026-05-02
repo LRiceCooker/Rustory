@@ -243,6 +243,10 @@ impl App {
         self.redo_stack.clear();
 
         // Handle app-level commands that need access to App state
+        if command == mapping::HISTORY {
+            self.handle_history_command(args);
+            return;
+        }
         if command == mapping::HELP {
             self.handle_help_command();
             return;
@@ -415,6 +419,9 @@ impl App {
                 "  new   — create a new campaign from a template (e.g. new my_game sample)",
             ),
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
+            StyledLine::plain("  history  — show recent state changes (e.g. history 5)"),
+            StyledLine::plain("  undo     — revert the last state change"),
+            StyledLine::plain("  redo     — re-apply the last undone change"),
             StyledLine::plain("  sound    — play audio (e.g. sound play ambiance/tavern.mp3)"),
             StyledLine::plain("  validate — check campaign files against schemas"),
             StyledLine::plain("  quit     — exit Rustory"),
@@ -1348,6 +1355,63 @@ impl App {
         }
 
         self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_history_command(&mut self, args: &str) {
+        let pl = match &self.persistence {
+            Some(pl) => pl,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let n: usize = if args.is_empty() {
+            10
+        } else {
+            match args.parse() {
+                Ok(v) => v,
+                Err(_) => {
+                    self.apply_command_result(CommandResult::Error(
+                        "Usage: history [n] (e.g. history 5)".to_string(),
+                    ));
+                    return;
+                }
+            }
+        };
+
+        match pl.history(n) {
+            Ok(entries) => {
+                if entries.is_empty() {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        "No history available.".to_string(),
+                        Style::default().fg(Color::Yellow),
+                    )]));
+                    return;
+                }
+
+                let mut lines = vec![StyledLine::new(
+                    format!("Last {} state change(s):", entries.len()),
+                    Style::default().fg(Color::Cyan),
+                )];
+
+                for entry in &entries {
+                    lines.push(StyledLine::plain(format!(
+                        "  [{}] {}",
+                        entry.hash, entry.message
+                    )));
+                }
+
+                self.apply_command_result(CommandResult::Output(lines));
+            }
+            Err(e) => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Cannot read history: {e}"
+                )));
+            }
+        }
     }
 
     fn handle_undo_command(&mut self) {
@@ -3622,6 +3686,40 @@ mod tests {
         // Any non-undo/redo command should clear redo stack
         app.dispatch_command("help");
         assert!(app.redo_stack.is_empty(), "Redo stack should be cleared after a regular command");
+    }
+
+    // --- History command tests ---
+
+    #[test]
+    fn test_history_no_campaign() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("history");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No campaign"), "Should report no campaign. Got: {output}");
+    }
+
+    #[test]
+    fn test_history_shows_commits() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("hist_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"HistTest\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("history");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Initial state"), "Should show initial commit. Got: {output}");
     }
 
     // --- Validate command tests ---
