@@ -45,6 +45,7 @@ fn help() -> CommandResult {
             "  new   — create a new campaign from a template (e.g. new my_game sample)",
         ),
         StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
+        StyledLine::plain("  sound — play audio (e.g. sound play ambiance/tavern.mp3)"),
         StyledLine::plain("  quit  — exit Rustory"),
     ])
 }
@@ -108,6 +109,9 @@ pub fn dispatch(
         }
         mapping::MAP => {
             CommandResult::Error("map command must be handled by the app".to_string())
+        }
+        mapping::SOUND => {
+            CommandResult::Error("sound command must be handled by the app".to_string())
         }
         _ => {
             // Look up in custom commands HashMap

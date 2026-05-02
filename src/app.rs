@@ -7,6 +7,8 @@ use rand::RngCore;
 use ratatui::style::{Color, Style};
 use ratatui::DefaultTerminal;
 
+use crate::audio::library::SoundLibrary;
+use crate::audio::player::AudioPlayer;
 use crate::commands::dispatcher::{self, CommandResult, StyledLine};
 use crate::commands::mapping;
 use crate::game_state::loader;
@@ -54,6 +56,8 @@ pub struct App {
     pub map_mode: bool,
     pub map_viewport: MapViewport,
     pub world_map: Option<WorldMap>,
+    pub audio_player: Option<AudioPlayer>,
+    pub sound_library: SoundLibrary,
 }
 
 impl Default for App {
@@ -82,6 +86,8 @@ impl App {
             map_mode: false,
             map_viewport: MapViewport::default(),
             world_map: None,
+            audio_player: AudioPlayer::new().ok(),
+            sound_library: SoundLibrary::default(),
         }
     }
 
@@ -105,6 +111,10 @@ impl App {
         }
         self.map_mode = false;
         self.map_viewport = MapViewport::default();
+
+        // Load SoundLibrary from sound/ if present (optional)
+        let sound_dir = path.join("sound");
+        self.sound_library = SoundLibrary::scan(&sound_dir).unwrap_or_default();
 
         errors
     }
@@ -223,6 +233,10 @@ impl App {
             self.handle_map_command(args);
             return;
         }
+        if command == mapping::SOUND {
+            self.handle_sound_command(args);
+            return;
+        }
 
         // Hybrid dispatch: built-in first, then custom commands, then unknown
         let custom_commands = self
@@ -330,6 +344,7 @@ impl App {
                 "  new   — create a new campaign from a template (e.g. new my_game sample)",
             ),
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
+            StyledLine::plain("  sound — play audio (e.g. sound play ambiance/tavern.mp3)"),
             StyledLine::plain("  quit  — exit Rustory"),
         ];
 
@@ -960,6 +975,307 @@ impl App {
             None => CommandResult::Error(format!("Character \"{char_name}\" not found.")),
         };
         self.apply_command_result(result);
+    }
+
+    fn handle_sound_command(&mut self, args: &str) {
+        if args.is_empty() || args == "list" {
+            self.sound_list(None);
+            return;
+        }
+
+        let sub_parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let subcmd = sub_parts[0];
+        let sub_args = sub_parts.get(1).unwrap_or(&"").trim();
+
+        match subcmd {
+            "list" => self.sound_list(if sub_args.is_empty() { None } else { Some(sub_args) }),
+            "play" => self.sound_play(sub_args),
+            "loop" => self.sound_play_loop(sub_args),
+            "stop" => self.sound_stop(),
+            "pause" => self.sound_pause(),
+            "resume" => self.sound_resume(),
+            "volume" => self.sound_volume(sub_args),
+            "status" => self.sound_status(),
+            "search" => self.sound_search(sub_args),
+            _ => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Unknown sound subcommand \"{subcmd}\". Try: list, play, loop, stop, pause, resume, volume, status, search"
+                )));
+            }
+        }
+    }
+
+    fn sound_list(&mut self, subfolder: Option<&str>) {
+        if self.sound_library.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                "Sound library is empty. Place audio files in the campaign's sound/ directory.".to_string(),
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let entries = self.sound_library.list(subfolder);
+        if entries.is_empty() {
+            let msg = match subfolder {
+                Some(folder) => format!("No entries in \"{folder}\"."),
+                None => "Sound library is empty.".to_string(),
+            };
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                msg,
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let header = match subfolder {
+            Some(folder) => format!("Sound library ({folder}):"),
+            None => "Sound library:".to_string(),
+        };
+        let mut lines = vec![StyledLine::new(header, Style::default().fg(Color::Cyan))];
+
+        for entry in entries {
+            let prefix = if entry.is_dir { "[dir] " } else { "      " };
+            lines.push(StyledLine::plain(format!("  {prefix}{}", entry.name)));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn sound_play(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: sound play <path> (e.g. sound play ambiance/tavern.mp3)".to_string(),
+            ));
+            return;
+        }
+
+        let full_path = match self.sound_library.resolve(args) {
+            Some(p) => p,
+            None => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Audio file \"{args}\" not found in sound library."
+                )));
+                return;
+            }
+        };
+
+        let player = match &mut self.audio_player {
+            Some(p) => p,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Audio device not available.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        match player.play(&full_path) {
+            Ok(()) => {
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    format!("Playing: {args}"),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            Err(e) => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Failed to play \"{args}\": {e}"
+                )));
+            }
+        }
+    }
+
+    fn sound_play_loop(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: sound loop <path> (e.g. sound loop ambiance/tavern.mp3)".to_string(),
+            ));
+            return;
+        }
+
+        let full_path = match self.sound_library.resolve(args) {
+            Some(p) => p,
+            None => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Audio file \"{args}\" not found in sound library."
+                )));
+                return;
+            }
+        };
+
+        let player = match &mut self.audio_player {
+            Some(p) => p,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Audio device not available.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        match player.play_loop(&full_path) {
+            Ok(()) => {
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    format!("Looping: {args}"),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            Err(e) => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Failed to loop \"{args}\": {e}"
+                )));
+            }
+        }
+    }
+
+    fn sound_stop(&mut self) {
+        match &mut self.audio_player {
+            Some(player) => {
+                player.stop();
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Playback stopped.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Audio device not available.".to_string(),
+                ));
+            }
+        }
+    }
+
+    fn sound_pause(&mut self) {
+        match &mut self.audio_player {
+            Some(player) => {
+                player.pause();
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Playback paused.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Audio device not available.".to_string(),
+                ));
+            }
+        }
+    }
+
+    fn sound_resume(&mut self) {
+        match &mut self.audio_player {
+            Some(player) => {
+                player.resume();
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Playback resumed.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Audio device not available.".to_string(),
+                ));
+            }
+        }
+    }
+
+    fn sound_volume(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: sound volume <0-100>".to_string(),
+            ));
+            return;
+        }
+
+        let vol: u32 = match args.parse() {
+            Ok(v) => v,
+            Err(_) => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Invalid volume \"{args}\". Expected a number 0-100."
+                )));
+                return;
+            }
+        };
+
+        let clamped = vol.min(100);
+        let vol_f32 = clamped as f32 / 100.0;
+
+        match &mut self.audio_player {
+            Some(player) => {
+                player.set_volume(vol_f32);
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    format!("Volume set to {clamped}%."),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Audio device not available.".to_string(),
+                ));
+            }
+        }
+    }
+
+    fn sound_status(&mut self) {
+        let player = match &self.audio_player {
+            Some(p) => p,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Audio device not available.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let mut lines = vec![StyledLine::new(
+            "Audio status:".to_string(),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        if let Some(track) = player.current_track() {
+            let state = if player.is_paused() {
+                "paused"
+            } else if player.is_playing() {
+                "playing"
+            } else {
+                "stopped"
+            };
+            let looping = if player.is_looping() { " (loop)" } else { "" };
+            lines.push(StyledLine::plain(format!("  Track: {track}{looping}")));
+            lines.push(StyledLine::plain(format!("  State: {state}")));
+        } else {
+            lines.push(StyledLine::plain("  No track loaded.".to_string()));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn sound_search(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: sound search <query>".to_string(),
+            ));
+            return;
+        }
+
+        let results = self.sound_library.search(args);
+        if results.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                format!("No audio files matching \"{args}\"."),
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::new(
+            format!("Sound files matching \"{}\":", args),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        for entry in results {
+            lines.push(StyledLine::plain(format!("  {}", entry.path)));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
     }
 
     fn handle_search_command(&mut self, args: &str) {
@@ -2532,5 +2848,239 @@ mod tests {
             output_texts.iter().any(|t| t.contains("No results")),
             "Search with no matches should say no results. Messages: {output_texts:?}"
         );
+    }
+
+    // --- Sound command tests ---
+
+    fn create_campaign_with_sound() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("sound_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"SoundTest\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("sound/ambiance")).unwrap();
+        std::fs::create_dir_all(campaign.join("sound/combat")).unwrap();
+        std::fs::write(campaign.join("sound/ambiance/tavern.mp3"), b"fake").unwrap();
+        std::fs::write(campaign.join("sound/ambiance/forest.ogg"), b"fake").unwrap();
+        std::fs::write(campaign.join("sound/combat/battle.wav"), b"fake").unwrap();
+        std::fs::write(campaign.join("sound/theme.flac"), b"fake").unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_sound_list_shows_library() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("sound");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Sound library"), "Should show library header. Got: {output}");
+        assert!(output.contains("ambiance"), "Should list ambiance dir. Got: {output}");
+        assert!(output.contains("combat"), "Should list combat dir. Got: {output}");
+        assert!(output.contains("theme.flac"), "Should list root file. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_list_subfolder() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("sound list ambiance");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("tavern.mp3"), "Should list tavern. Got: {output}");
+        assert!(output.contains("forest.ogg"), "Should list forest. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_list_empty_library() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("no_sound");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"NoSound\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("sound");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("empty"), "Should report empty library. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_search_finds_files() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("sound search tavern");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("tavern.mp3"), "Should find tavern.mp3. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_search_no_match() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("sound search nonexistent");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No audio files"), "Should report no matches. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_play_missing_file() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("sound play nonexistent.mp3");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("not found"), "Should report file not found. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_play_no_args() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound play");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_volume_valid() {
+        let mut app = App::new();
+        app.running = true;
+
+        // If no audio device, this should report "Audio device not available"
+        // If audio device available, it should set volume
+        app.dispatch_command("sound volume 50");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(
+            output.contains("Volume set to 50%") || output.contains("Audio device"),
+            "Should set volume or report no device. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_sound_volume_invalid() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound volume abc");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Invalid volume"), "Should report invalid volume. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_volume_no_args() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound volume");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_status() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound status");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        // Either shows "No track loaded" or "Audio device not available"
+        assert!(
+            output.contains("No track loaded") || output.contains("Audio device"),
+            "Should show status or report no device. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_sound_stop() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound stop");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(
+            output.contains("stopped") || output.contains("Audio device"),
+            "Should stop or report no device. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_sound_unknown_subcommand() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound foobar");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Unknown sound subcommand"), "Should report unknown subcommand. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_loop_no_args() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound loop");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_search_no_args() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound search");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_help_includes_sound() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("help");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("sound"), "Help should mention sound command. Got: {output}");
     }
 }
