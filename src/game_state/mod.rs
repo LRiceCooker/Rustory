@@ -2,9 +2,11 @@ pub mod character;
 pub mod loader;
 pub mod primitives;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::rules::{self, CampaignRules, CampaignSchema};
+use crate::scripting::loader::LolScript;
 pub use character::Character;
 
 #[derive(Debug)]
@@ -15,6 +17,7 @@ pub struct GameState {
     pub npcs: Vec<Character>,
     pub rules: Option<CampaignRules>,
     pub schema: Option<CampaignSchema>,
+    pub custom_commands: HashMap<String, LolScript>,
 }
 
 impl GameState {
@@ -31,6 +34,7 @@ impl GameState {
             npcs: Vec::new(),
             rules: None,
             schema: None,
+            custom_commands: HashMap::new(),
         }
     }
 
@@ -89,6 +93,9 @@ impl GameState {
         for npc in npc_result.characters {
             gs.add_npc(npc);
         }
+
+        // Load custom commands from rules/commands/*.lol
+        gs.custom_commands = crate::scripting::loader::load_custom_commands(path);
 
         (gs, all_errors)
     }
