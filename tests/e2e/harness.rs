@@ -7,6 +7,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 use rustory::app::{App, Message};
+use rustory::game_state::GameState;
 use rustory::ui;
 use tempfile::TempDir;
 
@@ -28,7 +29,25 @@ impl TestHarness {
         assert!(path.exists(), "Fixture not found: {}", path.display());
         let mut app = App::new();
         app.running = true;
-        // GameState loading will be wired in Phase 9
+        let errors = app.load_campaign(&path);
+        assert!(
+            errors.is_empty(),
+            "Fixture load errors: {:?}",
+            errors.iter().map(|e| e.to_string()).collect::<Vec<_>>()
+        );
+        Self { app }
+    }
+
+    /// Load a campaign from a TestCampaign builder path
+    pub fn from_campaign(campaign: &TestCampaign) -> Self {
+        let mut app = App::new();
+        app.running = true;
+        let errors = app.load_campaign(campaign.path());
+        assert!(
+            errors.is_empty(),
+            "Campaign load errors: {:?}",
+            errors.iter().map(|e| e.to_string()).collect::<Vec<_>>()
+        );
         Self { app }
     }
 
@@ -37,6 +56,11 @@ impl TestHarness {
         let mut app = App::with_rng(Box::new(StdRng::seed_from_u64(seed)));
         app.running = true;
         Self { app }
+    }
+
+    /// Access game state for assertions
+    pub fn game_state(&self) -> Option<&GameState> {
+        self.app.game_state()
     }
 
     /// Execute a command as if the user typed it + pressed Enter

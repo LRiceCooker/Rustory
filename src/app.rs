@@ -1,9 +1,13 @@
+use std::path::Path;
+
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::RngCore;
 use ratatui::style::{Color, Style};
 use ratatui::DefaultTerminal;
 
 use crate::commands::dispatcher::{self, CommandResult};
+use crate::game_state::loader;
+use crate::game_state::GameState;
 use crate::ui;
 
 #[derive(Debug, Clone)]
@@ -22,6 +26,7 @@ pub struct App {
     pub history_index: Option<usize>,
     pub scroll_offset: u16,
     pub rng: Box<dyn RngCore>,
+    pub game_state: Option<GameState>,
 }
 
 impl Default for App {
@@ -46,7 +51,45 @@ impl App {
             history_index: None,
             scroll_offset: 0,
             rng,
+            game_state: None,
         }
+    }
+
+    /// Load a campaign from a directory path into the game state.
+    /// Scans `players/` and `npc/` subdirectories for character data.
+    /// Returns a list of load errors (empty if all loaded successfully).
+    pub fn load_campaign(&mut self, path: &Path) -> Vec<loader::LoadError> {
+        let mut gs = GameState::new(path);
+        let mut all_errors = Vec::new();
+
+        // For now, we don't have a schema from system.toml yet (Phase 10),
+        // so we pass an empty expected_columns slice to skip column validation.
+        let expected: &[&str] = &[];
+
+        let players_dir = path.join("players");
+        let player_result = loader::load_characters_from_dir(&players_dir, expected);
+        all_errors.extend(player_result.errors);
+        for player in player_result.characters {
+            gs.add_player(player);
+        }
+
+        let npc_dir = path.join("npc");
+        let npc_result = loader::load_characters_from_dir(&npc_dir, expected);
+        all_errors.extend(npc_result.errors);
+        for npc in npc_result.characters {
+            gs.add_npc(npc);
+        }
+
+        self.game_state = Some(gs);
+        all_errors
+    }
+
+    pub fn game_state(&self) -> Option<&GameState> {
+        self.game_state.as_ref()
+    }
+
+    pub fn game_state_mut(&mut self) -> Option<&mut GameState> {
+        self.game_state.as_mut()
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
@@ -247,6 +290,102 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_game_state_none_by_default() {
+        let app = App::new();
+        assert!(app.game_state().is_none());
+    }
+
+    #[test]
+    fn test_load_campaign_sets_game_state() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("rules")).unwrap();
+
+        let mut app = App::new();
+        let errors = app.load_campaign(dir.path());
+
+        assert!(errors.is_empty());
+        assert!(app.game_state().is_some());
+        let gs = app.game_state().unwrap();
+        assert!(gs.players.is_empty());
+        assert!(gs.npcs.is_empty());
+    }
+
+    #[test]
+    fn test_load_campaign_with_players_and_npcs() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("rules")).unwrap();
+
+        let player_dir = dir.path().join("players/thorin");
+        std::fs::create_dir_all(&player_dir).unwrap();
+        std::fs::write(
+            player_dir.join("sheet.csv"),
+            "name,strength,dexterity\nThorin,18,12\n",
+        )
+        .unwrap();
+
+        let npc_dir = dir.path().join("npc/goblin");
+        std::fs::create_dir_all(&npc_dir).unwrap();
+        std::fs::write(
+            npc_dir.join("sheet.csv"),
+            "name,strength,hp_max\nGoblin,8,7\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        let errors = app.load_campaign(dir.path());
+
+        assert!(errors.is_empty());
+        let gs = app.game_state().unwrap();
+        assert_eq!(gs.players.len(), 1);
+        assert_eq!(gs.players[0].name, "Thorin");
+        assert_eq!(gs.players[0].get_stat("strength"), Some(18.0));
+        assert_eq!(gs.npcs.len(), 1);
+        assert_eq!(gs.npcs[0].name, "Goblin");
+    }
+
+    #[test]
+    fn test_load_campaign_missing_dirs_ok() {
+        let dir = TempDir::new().unwrap();
+        // No players/ or npc/ directories — should still work fine
+
+        let mut app = App::new();
+        let errors = app.load_campaign(dir.path());
+
+        assert!(errors.is_empty());
+        let gs = app.game_state().unwrap();
+        assert!(gs.players.is_empty());
+        assert!(gs.npcs.is_empty());
+    }
+
+    #[test]
+    fn test_game_state_mut_allows_modification() {
+        let dir = TempDir::new().unwrap();
+        let mut app = App::new();
+        app.load_campaign(dir.path());
+
+        let gs = app.game_state_mut().unwrap();
+        gs.add_player(crate::game_state::Character::new("TestPlayer"));
+
+        assert_eq!(app.game_state().unwrap().players.len(), 1);
+    }
+
+    #[test]
+    fn test_campaign_name_from_path() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("my_campaign");
+        std::fs::create_dir_all(&campaign_dir).unwrap();
+
+        let mut app = App::new();
+        app.load_campaign(&campaign_dir);
+
+        assert_eq!(
+            app.game_state().unwrap().campaign_name,
+            "my_campaign"
+        );
+    }
 
     #[test]
     fn test_quit_on_esc() {
