@@ -191,6 +191,17 @@ impl TestCampaign {
         self
     }
 
+    /// Add a sound file to the campaign's sound/ directory.
+    /// `rel_path` is relative to sound/ (e.g., "ambiance/tavern.mp3").
+    pub fn with_sound_file(self, rel_path: &str, content: &[u8]) -> Self {
+        let sound_path = self.dir.path().join("sound").join(rel_path);
+        if let Some(parent) = sound_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(sound_path, content).unwrap();
+        self
+    }
+
     pub fn with_map(self, json: &str) -> Self {
         let map_dir = self.dir.path().join("map");
         fs::create_dir_all(&map_dir).unwrap();
@@ -1311,6 +1322,164 @@ KTHXBYE",
         assert!(
             !all_output.contains("CUSTOM HELP HIJACKED"),
             "Custom help should NOT execute. Output: {all_output}"
+        );
+    }
+
+    // ---- Sound system E2E tests ----
+
+    #[test]
+    fn test_e2e_sound_list_shows_files() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"SoundTest\"\n")
+            .with_sound_file("ambiance/tavern.mp3", b"fake-audio")
+            .with_sound_file("combat/battle.wav", b"fake-audio")
+            .with_sound_file("theme.flac", b"fake-audio");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("sound list");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Sound library"),
+            "Should show library header. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("ambiance"),
+            "Should list ambiance dir. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("combat"),
+            "Should list combat dir. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("theme.flac"),
+            "Should list root file. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_sound_list_subfolder() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"SoundTest\"\n")
+            .with_sound_file("ambiance/tavern.mp3", b"fake-audio")
+            .with_sound_file("ambiance/forest.ogg", b"fake-audio");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("sound list ambiance");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("tavern.mp3"),
+            "Should list tavern. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("forest.ogg"),
+            "Should list forest. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_sound_search_finds_by_partial_name() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"SoundTest\"\n")
+            .with_sound_file("ambiance/tavern.mp3", b"fake-audio")
+            .with_sound_file("combat/battle.wav", b"fake-audio");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("sound search tav");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("tavern.mp3"),
+            "Should find tavern.mp3. Output: {all_output}"
+        );
+        assert!(
+            !all_output.contains("battle.wav"),
+            "Should not find battle.wav. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_sound_play_dispatches_missing_file() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"SoundTest\"\n")
+            .with_sound_file("ambiance/tavern.mp3", b"fake-audio");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("sound play nonexistent.mp3");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("not found"),
+            "Should report file not found. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_sound_status_no_playback() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"SoundTest\"\n")
+            .with_sound_file("theme.mp3", b"fake-audio");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("sound status");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Either "No track loaded" (audio device available) or "Audio device" (no device in CI)
+        assert!(
+            all_output.contains("No track loaded") || all_output.contains("Audio device"),
+            "Should show status. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_sound_empty_library() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"NoSound\"\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("sound");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("empty"),
+            "Should report empty library. Output: {all_output}"
         );
     }
 }
