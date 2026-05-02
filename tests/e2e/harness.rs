@@ -210,7 +210,11 @@ mod tests {
             .map(|m| m.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(all_output.contains("help") && all_output.contains("quit") && all_output.contains("roll"));
+        assert!(
+            all_output.contains("help")
+                && all_output.contains("quit")
+                && all_output.contains("roll")
+        );
     }
 
     #[test]
@@ -297,7 +301,11 @@ mod tests {
             .map(|m| m.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(all_output.contains("help") && all_output.contains("quit") && all_output.contains("roll"));
+        assert!(
+            all_output.contains("help")
+                && all_output.contains("quit")
+                && all_output.contains("roll")
+        );
     }
 
     #[test]
@@ -677,11 +685,7 @@ mod tests {
         let gs = harness.game_state().unwrap();
         let rules = gs.rules.as_ref().unwrap();
 
-        let move_check = rules
-            .checks
-            .iter()
-            .find(|c| c.name == "move")
-            .unwrap();
+        let move_check = rules.checks.iter().find(|c| c.name == "move").unwrap();
 
         // Guaranteed success: stat = +20, 2d6 (min 2) + 20 = 22, always >= 10
         let high_stat_char =
@@ -697,8 +701,7 @@ mod tests {
         );
 
         // Guaranteed miss: stat = -20, 2d6 (max 12) + (-20) = -8, always <= 6
-        let low_stat_char =
-            rustory::game_state::Character::new("LowStat").with_stat("cool", -20.0);
+        let low_stat_char = rustory::game_state::Character::new("LowStat").with_stat("cool", -20.0);
 
         let mut rng2 = StdRng::seed_from_u64(42);
         assert_eq!(
@@ -809,15 +812,16 @@ mod tests {
         );
 
         // Verify new folder structure
-        assert!(dest.join("rules/system.toml").exists(), "rules/system.toml should exist");
+        assert!(
+            dest.join("rules/system.toml").exists(),
+            "rules/system.toml should exist"
+        );
         assert!(dest.join("players").exists(), "players/ should exist");
         assert!(dest.join("npc").exists(), "npc/ should exist");
         assert!(dest.join("notes").exists(), "notes/ should exist");
 
         // Players dir should be empty (not copied from template)
-        let player_entries: Vec<_> = std::fs::read_dir(dest.join("players"))
-            .unwrap()
-            .collect();
+        let player_entries: Vec<_> = std::fs::read_dir(dest.join("players")).unwrap().collect();
         assert!(player_entries.is_empty(), "players/ should be empty");
 
         // Now load the new campaign and verify rules match

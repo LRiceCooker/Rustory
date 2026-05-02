@@ -253,10 +253,7 @@ mod tests {
     fn test_substitute_multiple_placeholders() {
         let mut args = HashMap::new();
         args.insert("stat".to_string(), "cool".to_string());
-        assert_eq!(
-            substitute_placeholders("2d6 + {stat}", &args),
-            "2d6 + cool"
-        );
+        assert_eq!(substitute_placeholders("2d6 + {stat}", &args), "2d6 + cool");
     }
 
     // --- resolve_derived ---
@@ -294,8 +291,7 @@ mod tests {
     #[test]
     fn test_resolve_derived_multi_modifier() {
         let character = make_dnd_character();
-        let derived =
-            Derived::new("hp_bonus", "modifier(constitution) + modifier(strength)");
+        let derived = Derived::new("hp_bonus", "modifier(constitution) + modifier(strength)");
         // con 16 → +3, str 18 → +4
         assert_eq!(resolve_derived(&character, &derived), 7.0);
     }

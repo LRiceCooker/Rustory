@@ -37,7 +37,9 @@ fn help() -> CommandResult {
         StyledLine::plain("Available commands:"),
         StyledLine::plain("  help  — show this help"),
         StyledLine::plain("  load  — load a campaign folder (e.g. load sample)"),
-        StyledLine::plain("  new   — create a new campaign from a template (e.g. new my_game sample)"),
+        StyledLine::plain(
+            "  new   — create a new campaign from a template (e.g. new my_game sample)",
+        ),
         StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
         StyledLine::plain("  quit  — exit Rustory"),
     ])
@@ -87,7 +89,9 @@ pub fn dispatch(input: &str, rng: &mut dyn RngCore) -> CommandResult {
     match command {
         mapping::QUIT => CommandResult::Quit,
         mapping::HELP => help(),
-        mapping::LOAD => CommandResult::Error("load command must be handled by the app".to_string()),
+        mapping::LOAD => {
+            CommandResult::Error("load command must be handled by the app".to_string())
+        }
         mapping::NEW => CommandResult::Error("new command must be handled by the app".to_string()),
         mapping::ROLL => roll_dice(args, rng),
         _ => CommandResult::Unknown(command.to_string()),

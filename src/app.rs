@@ -210,7 +210,9 @@ impl App {
             StyledLine::plain("Available commands:"),
             StyledLine::plain("  help  — show this help"),
             StyledLine::plain("  load  — load a campaign folder (e.g. load sample)"),
-            StyledLine::plain("  new   — create a new campaign from a template (e.g. new my_game sample)"),
+            StyledLine::plain(
+                "  new   — create a new campaign from a template (e.g. new my_game sample)",
+            ),
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
             StyledLine::plain("  quit  — exit Rustory"),
         ];
@@ -419,7 +421,10 @@ impl App {
 
         self.apply_command_result(CommandResult::Output(vec![
             StyledLine::new(
-                format!("Campaign \"{name}\" created from template \"{}\".", template_path.display()),
+                format!(
+                    "Campaign \"{name}\" created from template \"{}\".",
+                    template_path.display()
+                ),
                 Style::default().fg(Color::Green),
             ),
             StyledLine::new(
@@ -1018,11 +1023,7 @@ mod tests {
         // Create a player with wrong columns (missing dexterity)
         let player_dir = campaign_dir.join("players/broken");
         std::fs::create_dir_all(&player_dir).unwrap();
-        std::fs::write(
-            player_dir.join("sheet.csv"),
-            "name,strength\nBroken,10\n",
-        )
-        .unwrap();
+        std::fs::write(player_dir.join("sheet.csv"), "name,strength\nBroken,10\n").unwrap();
 
         let mut app = App::new();
         app.running = true;
@@ -1095,9 +1096,7 @@ mod tests {
         assert!(system_toml.contains("Test System"));
 
         // players/ should be empty (not copied from template)
-        let player_entries: Vec<_> = std::fs::read_dir(dest.join("players"))
-            .unwrap()
-            .collect();
+        let player_entries: Vec<_> = std::fs::read_dir(dest.join("players")).unwrap().collect();
         assert!(
             player_entries.is_empty(),
             "players/ should be empty in new campaign"
@@ -1235,9 +1234,7 @@ mod tests {
         ));
 
         let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
-        assert!(output_texts
-            .iter()
-            .any(|t| t.contains("already exists")));
+        assert!(output_texts.iter().any(|t| t.contains("already exists")));
     }
 
     // --- help command campaign status tests ---
@@ -1283,9 +1280,7 @@ mod tests {
             "help should show campaign name. Messages: {output_texts:?}"
         );
         assert!(
-            output_texts
-                .iter()
-                .any(|t| t.contains("Test System")),
+            output_texts.iter().any(|t| t.contains("Test System")),
             "help should show system name. Messages: {output_texts:?}"
         );
     }

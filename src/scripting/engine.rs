@@ -54,6 +54,12 @@ pub struct ScriptEngine {
     callbacks: Vec<CallbackEntry>,
 }
 
+impl Default for ScriptEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScriptEngine {
     pub fn new() -> Self {
         Self {
@@ -180,9 +186,7 @@ KTHXBYE",
     #[test]
     fn test_multiple_callbacks() {
         let mut engine = ScriptEngine::new();
-        engine.register("GET_NAME", Some(0), |_| {
-            Value::Yarn("Thorin".to_string())
-        });
+        engine.register("GET_NAME", Some(0), |_| Value::Yarn("Thorin".to_string()));
         engine.register("GET_HP", Some(0), |_| Value::Numbr(52));
         let output = engine
             .execute(

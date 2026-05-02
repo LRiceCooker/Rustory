@@ -251,10 +251,7 @@ mod tests {
             .find(|c| c.name == "ability_check")
             .expect("ability_check should exist");
         assert_eq!(ability_check.resolution_mode, ResolutionMode::RollOver);
-        assert!(rules
-            .checks
-            .iter()
-            .any(|c| c.name == "saving_throw"));
+        assert!(rules.checks.iter().any(|c| c.name == "saving_throw"));
 
         // Resources
         assert_eq!(rules.resource_defs.len(), 2);
@@ -293,7 +290,9 @@ mod tests {
 
         // NPC: Goblin King
         assert_eq!(gs.npcs.len(), 1);
-        let gk = gs.get_npc("Goblin King").expect("Goblin King should be loaded");
+        let gk = gs
+            .get_npc("Goblin King")
+            .expect("Goblin King should be loaded");
         assert_eq!(gk.get_stat("strength"), Some(16.0));
         assert_eq!(gk.get_stat("hp_max"), Some(45.0));
         assert!(gk.lore.is_some());
