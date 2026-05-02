@@ -6,11 +6,17 @@ use crate::ui;
 #[derive(Debug, Default)]
 pub struct App {
     pub running: bool,
+    pub input: String,
+    pub cursor_position: usize,
 }
 
 impl App {
     pub fn new() -> Self {
-        Self { running: false }
+        Self {
+            running: false,
+            input: String::new(),
+            cursor_position: 0,
+        }
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
@@ -32,25 +38,71 @@ impl App {
 
     pub fn on_key(&mut self, key: KeyEvent) {
         match (key.code, key.modifiers) {
-            (KeyCode::Char('q'), _) => self.running = false,
             (KeyCode::Esc, _) => self.running = false,
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => self.running = false,
+            (KeyCode::Char(c), _) => self.insert_char(c),
+            (KeyCode::Backspace, _) => self.delete_char_before(),
+            (KeyCode::Delete, _) => self.delete_char_at(),
+            (KeyCode::Left, _) => self.move_cursor_left(),
+            (KeyCode::Right, _) => self.move_cursor_right(),
+            (KeyCode::Home, _) => self.cursor_position = 0,
+            (KeyCode::End, _) => self.cursor_position = self.input.len(),
             _ => {}
         }
+    }
+
+    fn insert_char(&mut self, c: char) {
+        self.input.insert(self.cursor_position, c);
+        self.cursor_position += c.len_utf8();
+    }
+
+    fn delete_char_before(&mut self) {
+        if self.cursor_position > 0 {
+            let prev = self.prev_char_boundary();
+            self.input.drain(prev..self.cursor_position);
+            self.cursor_position = prev;
+        }
+    }
+
+    fn delete_char_at(&mut self) {
+        if self.cursor_position < self.input.len() {
+            let next = self.next_char_boundary();
+            self.input.drain(self.cursor_position..next);
+        }
+    }
+
+    fn move_cursor_left(&mut self) {
+        if self.cursor_position > 0 {
+            self.cursor_position = self.prev_char_boundary();
+        }
+    }
+
+    fn move_cursor_right(&mut self) {
+        if self.cursor_position < self.input.len() {
+            self.cursor_position = self.next_char_boundary();
+        }
+    }
+
+    fn prev_char_boundary(&self) -> usize {
+        let mut pos = self.cursor_position - 1;
+        while !self.input.is_char_boundary(pos) {
+            pos -= 1;
+        }
+        pos
+    }
+
+    fn next_char_boundary(&self) -> usize {
+        let mut pos = self.cursor_position + 1;
+        while pos < self.input.len() && !self.input.is_char_boundary(pos) {
+            pos += 1;
+        }
+        pos
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_quit_on_q() {
-        let mut app = App::new();
-        app.running = true;
-        app.on_key(KeyEvent::from(KeyCode::Char('q')));
-        assert!(!app.running);
-    }
 
     #[test]
     fn test_quit_on_esc() {
@@ -69,14 +121,123 @@ mod tests {
     }
 
     #[test]
-    fn test_running_stays_true_on_other_keys() {
+    fn test_type_characters() {
         let mut app = App::new();
         app.running = true;
-        app.on_key(KeyEvent::from(KeyCode::Char('a')));
-        assert!(app.running);
-        app.on_key(KeyEvent::from(KeyCode::Enter));
-        assert!(app.running);
+        app.on_key(KeyEvent::from(KeyCode::Char('h')));
+        app.on_key(KeyEvent::from(KeyCode::Char('i')));
+        assert_eq!(app.input, "hi");
+        assert_eq!(app.cursor_position, 2);
+    }
+
+    #[test]
+    fn test_backspace_at_start() {
+        let mut app = App::new();
+        app.running = true;
+        app.on_key(KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(app.input, "");
+        assert_eq!(app.cursor_position, 0);
+    }
+
+    #[test]
+    fn test_backspace_at_middle() {
+        let mut app = App::new();
+        app.running = true;
+        app.input = "abc".to_string();
+        app.cursor_position = 2;
+        app.on_key(KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(app.input, "ac");
+        assert_eq!(app.cursor_position, 1);
+    }
+
+    #[test]
+    fn test_backspace_at_end() {
+        let mut app = App::new();
+        app.running = true;
+        app.input = "abc".to_string();
+        app.cursor_position = 3;
+        app.on_key(KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(app.input, "ab");
+        assert_eq!(app.cursor_position, 2);
+    }
+
+    #[test]
+    fn test_delete_at_cursor() {
+        let mut app = App::new();
+        app.input = "abc".to_string();
+        app.cursor_position = 1;
+        app.on_key(KeyEvent::from(KeyCode::Delete));
+        assert_eq!(app.input, "ac");
+        assert_eq!(app.cursor_position, 1);
+    }
+
+    #[test]
+    fn test_delete_at_end_does_nothing() {
+        let mut app = App::new();
+        app.input = "abc".to_string();
+        app.cursor_position = 3;
+        app.on_key(KeyEvent::from(KeyCode::Delete));
+        assert_eq!(app.input, "abc");
+    }
+
+    #[test]
+    fn test_cursor_left_right() {
+        let mut app = App::new();
+        app.input = "abc".to_string();
+        app.cursor_position = 3;
         app.on_key(KeyEvent::from(KeyCode::Left));
+        assert_eq!(app.cursor_position, 2);
+        app.on_key(KeyEvent::from(KeyCode::Left));
+        assert_eq!(app.cursor_position, 1);
+        app.on_key(KeyEvent::from(KeyCode::Right));
+        assert_eq!(app.cursor_position, 2);
+    }
+
+    #[test]
+    fn test_cursor_left_at_start() {
+        let mut app = App::new();
+        app.input = "abc".to_string();
+        app.cursor_position = 0;
+        app.on_key(KeyEvent::from(KeyCode::Left));
+        assert_eq!(app.cursor_position, 0);
+    }
+
+    #[test]
+    fn test_cursor_right_at_end() {
+        let mut app = App::new();
+        app.input = "abc".to_string();
+        app.cursor_position = 3;
+        app.on_key(KeyEvent::from(KeyCode::Right));
+        assert_eq!(app.cursor_position, 3);
+    }
+
+    #[test]
+    fn test_home_end() {
+        let mut app = App::new();
+        app.input = "hello".to_string();
+        app.cursor_position = 3;
+        app.on_key(KeyEvent::from(KeyCode::Home));
+        assert_eq!(app.cursor_position, 0);
+        app.on_key(KeyEvent::from(KeyCode::End));
+        assert_eq!(app.cursor_position, 5);
+    }
+
+    #[test]
+    fn test_insert_at_middle() {
+        let mut app = App::new();
+        app.input = "ac".to_string();
+        app.cursor_position = 1;
+        app.on_key(KeyEvent::from(KeyCode::Char('b')));
+        assert_eq!(app.input, "abc");
+        assert_eq!(app.cursor_position, 2);
+    }
+
+    #[test]
+    fn test_q_types_into_input() {
+        let mut app = App::new();
+        app.running = true;
+        app.on_key(KeyEvent::from(KeyCode::Char('q')));
         assert!(app.running);
+        assert_eq!(app.input, "q");
     }
 }
