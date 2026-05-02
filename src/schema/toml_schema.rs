@@ -222,7 +222,7 @@ fn validate_named_section(
                     file: path.to_path_buf(),
                     line: None,
                     expected: format!("[{}] to be a table/section", section_def.name),
-                    found: format!("{}", value_type_name(value)),
+                    found: value_type_name(value).to_string(),
                     suggestion: format!(
                         "Make [{}] a proper TOML section (table).",
                         section_def.name
@@ -250,11 +250,9 @@ fn validate_wildcard_section(
             errors.push(ValidationError {
                 file: path.to_path_buf(),
                 line: None,
-                expected: format!("at least one [{}.<name>] section", prefix),
+                expected: format!("at least one [{prefix}.<name>] section"),
                 found: format!("[{prefix}] section missing"),
-                suggestion: format!(
-                    "Add at least one [{prefix}.<name>] section to the TOML file."
-                ),
+                suggestion: format!("Add at least one [{prefix}.<name>] section to the TOML file."),
             });
         }
         None => {}
@@ -267,7 +265,7 @@ fn validate_wildcard_section(
                             file: path.to_path_buf(),
                             line: None,
                             expected: format!("[{full_name}] to be a table/section"),
-                            found: format!("{}", value_type_name(sub_value)),
+                            found: value_type_name(sub_value).to_string(),
                             suggestion: format!("Make [{full_name}] a proper TOML section."),
                         });
                         continue;
@@ -560,7 +558,10 @@ success = "result >= dc"
         )]);
 
         let result = validate_toml(&path, &schema);
-        assert!(result.is_ok(), "Expected valid wildcard sections: {result:?}");
+        assert!(
+            result.is_ok(),
+            "Expected valid wildcard sections: {result:?}"
+        );
     }
 
     #[test]
@@ -593,8 +594,7 @@ success = "result >= dc"
         let errors = result.unwrap_err();
         assert!(errors
             .iter()
-            .any(|e| e.expected.contains("\"success\"")
-                && e.expected.contains("[check.ability]")));
+            .any(|e| e.expected.contains("\"success\"") && e.expected.contains("[check.ability]")));
     }
 
     #[test]
@@ -611,9 +611,7 @@ success = "result >= dc"
         let result = validate_toml(&path, &schema);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors
-            .iter()
-            .any(|e| e.expected.contains("[check.<name>]")));
+        assert!(errors.iter().any(|e| e.expected.contains("[check.<name>]")));
     }
 
     #[test]

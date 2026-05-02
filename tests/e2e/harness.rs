@@ -300,7 +300,10 @@ mod tests {
 
         // Verify game_state loaded
         let gs = harness.game_state().expect("game state should be loaded");
-        assert_eq!(gs.campaign_name, campaign.path().file_name().unwrap().to_str().unwrap());
+        assert_eq!(
+            gs.campaign_name,
+            campaign.path().file_name().unwrap().to_str().unwrap()
+        );
 
         // Verify player loaded with correct stats
         assert_eq!(gs.players.len(), 1);
@@ -368,10 +371,7 @@ mod tests {
     fn test_e2e_load_campaign_with_non_numeric_stats() {
         let campaign = TestCampaign::new()
             .with_system_toml("[system]\nname = \"Mixed Types\"\n")
-            .with_player(
-                "thorin",
-                "name,class,level,strength\nThorin,Fighter,5,18\n",
-            )
+            .with_player("thorin", "name,class,level,strength\nThorin,Fighter,5,18\n")
             .with_npc("goblin", "name,class,level,strength\nGoblin,Monster,1,8\n");
 
         let harness = TestHarness::from_campaign(&campaign);

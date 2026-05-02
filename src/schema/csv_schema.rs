@@ -151,9 +151,7 @@ pub fn validate_csv(path: &Path, schema: &CsvSchema) -> Result<(), Vec<Validatio
                 line: Some(1),
                 expected: format!("only columns: {expected_display}"),
                 found: format!("unexpected column \"{header}\""),
-                suggestion: format!(
-                    "Remove the \"{header}\" column, or add it to the schema."
-                ),
+                suggestion: format!("Remove the \"{header}\" column, or add it to the schema."),
             });
         }
     }
@@ -427,8 +425,9 @@ mod tests {
         let result = validate_csv(&path, &schema);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors.iter().any(|e| e.expected.contains("boolean")
-            && e.found.contains("maybe")));
+        assert!(errors
+            .iter()
+            .any(|e| e.expected.contains("boolean") && e.found.contains("maybe")));
     }
 
     #[test]
@@ -495,11 +494,7 @@ mod tests {
     fn test_type_error_includes_line_number() {
         let dir = test_dir();
         let path = dir.path().join("sheet.csv");
-        fs::write(
-            &path,
-            "name,score\nAlice,100\nBob,good\nCharlie,50\n",
-        )
-        .unwrap();
+        fs::write(&path, "name,score\nAlice,100\nBob,good\nCharlie,50\n").unwrap();
 
         let schema = CsvSchema::new(vec![
             ColumnDef::required_string("name"),

@@ -4,6 +4,7 @@ pub mod primitives;
 
 use std::path::{Path, PathBuf};
 
+use crate::rules::{CampaignRules, CampaignSchema};
 pub use character::Character;
 
 #[derive(Debug)]
@@ -12,6 +13,8 @@ pub struct GameState {
     pub campaign_path: PathBuf,
     pub players: Vec<Character>,
     pub npcs: Vec<Character>,
+    pub rules: Option<CampaignRules>,
+    pub schema: Option<CampaignSchema>,
 }
 
 impl GameState {
@@ -26,6 +29,8 @@ impl GameState {
             campaign_path: campaign_path.to_path_buf(),
             players: Vec::new(),
             npcs: Vec::new(),
+            rules: None,
+            schema: None,
         }
     }
 
