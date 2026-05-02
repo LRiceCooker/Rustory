@@ -205,6 +205,12 @@ impl ScriptContext {
             c.borrow_mut().rustory_stop_sound(args)
         });
 
+        // --- Bestiary ---
+        let c = ctx.clone();
+        engine.register("RUSTORY_SPAWN", None, move |args| {
+            c.borrow_mut().rustory_spawn(args)
+        });
+
         // --- Input ---
         let c = ctx.clone();
         engine.register("RUSTORY_ASK", Some(1), move |args| {
@@ -685,6 +691,81 @@ impl ScriptContext {
     fn rustory_stop_sound(&mut self, _args: Vec<Value>) -> Value {
         self.sound_commands.push(SoundCommand::Stop);
         Value::Noob
+    }
+
+    // --- Bestiary ---
+
+    /// RUSTORY_SPAWN(template) or RUSTORY_SPAWN(template, name) -> Yarn
+    /// Spawn an NPC from a bestiary template. Returns the NPC name.
+    fn rustory_spawn(&mut self, args: Vec<Value>) -> Value {
+        if args.is_empty() {
+            return Value::Noob;
+        }
+
+        let template_name = value_to_string(&args[0]);
+        let custom_name = args.get(1).map(value_to_string).filter(|s| !s.is_empty());
+
+        let entry = match crate::bestiary::find_entry(&self.game_state.bestiary_entries, &template_name) {
+            Some(e) => e.clone(),
+            None => return Value::Noob,
+        };
+
+        let npc_name = match custom_name {
+            Some(name) => name,
+            None => {
+                let base = &entry.name;
+                let mut counter = 1u32;
+                loop {
+                    let candidate = format!("{base} #{counter}");
+                    if self.game_state.get_npc(&candidate).is_none() {
+                        break candidate;
+                    }
+                    counter += 1;
+                }
+            }
+        };
+
+        let mut character = Character::new(&npc_name);
+        for stat in &entry.stats {
+            character.stats.push(stat.clone());
+        }
+
+        // Apply resource_defs (gauges/pools) from rules
+        if let Some(rules) = &self.game_state.rules {
+            for def in &rules.resource_defs {
+                match def {
+                    crate::rules::loader::ResourceDef::Gauge { name, max_stat } => {
+                        if !character.gauges.contains_key(name) {
+                            let max_val = character.get_stat(max_stat).unwrap_or(0.0);
+                            if max_val > 0.0 {
+                                character.gauges.insert(
+                                    name.clone(),
+                                    crate::game_state::primitives::Gauge::new(name, max_val),
+                                );
+                            }
+                        }
+                    }
+                    crate::rules::loader::ResourceDef::Pool {
+                        name,
+                        max,
+                        resets_on,
+                    } => {
+                        if !character.pools.contains_key(name) {
+                            character.pools.insert(
+                                name.clone(),
+                                crate::game_state::primitives::Pool::new(name, *max, resets_on.clone()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let result_name = npc_name.clone();
+        self.game_state.add_npc(character);
+        self.output.push(format!("Spawned {result_name} from bestiary."));
+
+        Value::Yarn(result_name)
     }
 
     // --- Input ---
@@ -1671,5 +1752,88 @@ KTHXBYE",
             "perception output should mention the check: {:?}",
             output
         );
+    }
+
+    // ---- Spawn ----
+
+    fn make_game_state_with_bestiary() -> GameState {
+        let mut gs = make_game_state_with_rules();
+        gs.bestiary_entries = vec![
+            crate::bestiary::BestiaryEntry {
+                name: "Goblin Warrior".to_string(),
+                stats: vec![
+                    crate::game_state::primitives::Stat::new("strength", 8.0),
+                    crate::game_state::primitives::Stat::new("dexterity", 14.0),
+                    crate::game_state::primitives::Stat::new("hp_max", 7.0),
+                    crate::game_state::primitives::Stat::new("ac", 15.0),
+                ],
+            },
+        ];
+        gs
+    }
+
+    #[test]
+    fn test_rustory_spawn_with_name() {
+        let gs = make_game_state_with_bestiary();
+        let initial_npcs = gs.npcs.len();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+
+        let result = ctx.rustory_spawn(vec![
+            Value::Yarn("Goblin Warrior".to_string()),
+            Value::Yarn("Guard".to_string()),
+        ]);
+        assert_eq!(result, Value::Yarn("Guard".to_string()));
+        assert_eq!(ctx.game_state.npcs.len(), initial_npcs + 1);
+        let spawned = ctx.game_state.get_npc("Guard").unwrap();
+        assert_eq!(spawned.get_stat("strength"), Some(8.0));
+        assert_eq!(spawned.get_stat("hp_max"), Some(7.0));
+        // Gauge should be applied from resource_defs
+        assert!(spawned.gauges.contains_key("hp"));
+        assert_eq!(spawned.gauges["hp"].max, 7.0);
+    }
+
+    #[test]
+    fn test_rustory_spawn_auto_name() {
+        let gs = make_game_state_with_bestiary();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+
+        let result = ctx.rustory_spawn(vec![Value::Yarn("Goblin Warrior".to_string())]);
+        assert_eq!(result, Value::Yarn("Goblin Warrior #1".to_string()));
+        assert!(ctx.game_state.get_npc("Goblin Warrior #1").is_some());
+    }
+
+    #[test]
+    fn test_rustory_spawn_auto_name_increments() {
+        let gs = make_game_state_with_bestiary();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+
+        ctx.rustory_spawn(vec![Value::Yarn("Goblin Warrior".to_string())]);
+        ctx.rustory_spawn(vec![Value::Yarn("Goblin Warrior".to_string())]);
+        let result = ctx.rustory_spawn(vec![Value::Yarn("Goblin Warrior".to_string())]);
+
+        assert_eq!(result, Value::Yarn("Goblin Warrior #3".to_string()));
+        assert!(ctx.game_state.get_npc("Goblin Warrior #1").is_some());
+        assert!(ctx.game_state.get_npc("Goblin Warrior #2").is_some());
+        assert!(ctx.game_state.get_npc("Goblin Warrior #3").is_some());
+    }
+
+    #[test]
+    fn test_rustory_spawn_unknown_template() {
+        let gs = make_game_state_with_bestiary();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+        let initial_npcs = ctx.game_state.npcs.len();
+
+        let result = ctx.rustory_spawn(vec![Value::Yarn("Dragon".to_string())]);
+        assert_eq!(result, Value::Noob);
+        assert_eq!(ctx.game_state.npcs.len(), initial_npcs);
+    }
+
+    #[test]
+    fn test_rustory_spawn_no_args() {
+        let gs = make_game_state_with_bestiary();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+
+        let result = ctx.rustory_spawn(vec![]);
+        assert_eq!(result, Value::Noob);
     }
 }

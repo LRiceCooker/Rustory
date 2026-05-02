@@ -12,10 +12,11 @@ pub const REDO: &str = "redo";
 pub const SET: &str = "set";
 pub const SHOW: &str = "show";
 pub const SOUND: &str = "sound";
+pub const SPAWN: &str = "spawn";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
 
-pub const COMMANDS: [&str; 16] = [
+pub const COMMANDS: [&str; 17] = [
     BESTIARY, HELP, HISTORY, LIST, LOAD, MAP, NEW, QUIT, REDO, ROLL, SEARCH, SET, SHOW, SOUND,
-    UNDO, VALIDATE,
+    SPAWN, UNDO, VALIDATE,
 ];

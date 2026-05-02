@@ -291,6 +291,10 @@ impl App {
             self.handle_bestiary_command(args);
             return;
         }
+        if command == mapping::SPAWN {
+            self.handle_spawn_command(args);
+            return;
+        }
         // Hybrid dispatch: built-in first, then custom commands, then unknown
         let custom_commands = self
             .game_state
@@ -443,6 +447,7 @@ impl App {
             StyledLine::plain("  redo     — re-apply the last undone change"),
             StyledLine::plain("  sound    — play audio (e.g. sound play ambiance/tavern.mp3)"),
             StyledLine::plain("  bestiary — list creature templates (e.g. bestiary info goblin)"),
+            StyledLine::plain("  spawn    — create NPC from bestiary (e.g. spawn goblin)"),
             StyledLine::plain("  validate — check campaign files against schemas"),
             StyledLine::plain("  quit     — exit Rustory"),
         ];
@@ -1787,6 +1792,120 @@ impl App {
                 )));
             }
         }
+    }
+
+    fn handle_spawn_command(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: spawn <template> [name] (e.g. spawn goblin, spawn goblin \"Goblin Guard\")".to_string(),
+            ));
+            return;
+        }
+
+        // Parse args: first word is template, rest is optional name
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let template_name = parts[0];
+        let custom_name = parts.get(1).map(|s| s.trim()).filter(|s| !s.is_empty());
+
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        // Look up the bestiary entry
+        let entry = match crate::bestiary::find_entry(&gs.bestiary_entries, template_name) {
+            Some(e) => e.clone(),
+            None => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Creature template \"{template_name}\" not found in bestiary."
+                )));
+                return;
+            }
+        };
+
+        // Determine the NPC name: use custom name or auto-generate
+        let npc_name = match custom_name {
+            Some(name) => name.to_string(),
+            None => {
+                // Auto-name: "Goblin #1", "Goblin #2", etc.
+                let base = &entry.name;
+                let mut counter = 1u32;
+                loop {
+                    let candidate = format!("{base} #{counter}");
+                    let gs = self.game_state.as_ref().unwrap();
+                    if gs.get_npc(&candidate).is_none() {
+                        break candidate;
+                    }
+                    counter += 1;
+                }
+            }
+        };
+
+        // Create character from bestiary entry stats
+        let mut character = crate::game_state::Character::new(&npc_name);
+        for stat in &entry.stats {
+            character.stats.push(stat.clone());
+        }
+
+        // Apply resource_defs (gauges/pools) from rules
+        let gs = self.game_state.as_ref().unwrap();
+        if let Some(rules) = &gs.rules {
+            for def in &rules.resource_defs {
+                match def {
+                    crate::rules::loader::ResourceDef::Gauge { name, max_stat } => {
+                        if !character.gauges.contains_key(name) {
+                            let max_val = character.get_stat(max_stat).unwrap_or(0.0);
+                            if max_val > 0.0 {
+                                character.gauges.insert(
+                                    name.clone(),
+                                    crate::game_state::primitives::Gauge::new(name, max_val),
+                                );
+                            }
+                        }
+                    }
+                    crate::rules::loader::ResourceDef::Pool {
+                        name,
+                        max,
+                        resets_on,
+                    } => {
+                        if !character.pools.contains_key(name) {
+                            character.pools.insert(
+                                name.clone(),
+                                crate::game_state::primitives::Pool::new(name, *max, resets_on.clone()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Persist to disk if persistence + schema available
+        let schema = gs.schema.clone();
+        let description = format!("Spawned {} from bestiary", npc_name);
+        if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &schema) {
+            if let Err(e) = pl.persist_character(&character, false, schema, &description) {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Spawned {npc_name} but failed to persist: {e}"
+                )));
+                // Still add to game state even if persistence fails
+                self.game_state.as_mut().unwrap().add_npc(character);
+                return;
+            }
+        }
+
+        // Add to game state
+        let npc_name_display = npc_name.clone();
+        self.game_state.as_mut().unwrap().add_npc(character);
+
+        self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+            format!("Spawned {npc_name_display} from bestiary template \"{template_name}\"."),
+            Style::default().fg(Color::Green),
+        )]));
     }
 
     fn handle_history_command(&mut self, args: &str) {
@@ -4667,5 +4786,111 @@ mod tests {
 
         let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
         assert!(output.contains("Unknown bestiary subcommand"), "Should report unknown subcommand. Got: {output}");
+    }
+
+    // --- Spawn command tests ---
+
+    fn setup_bestiary_campaign(dir: &TempDir, name: &str) -> std::path::PathBuf {
+        let campaign = dir.path().join(name);
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n\
+             [character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n\n\
+             [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
+        std::fs::write(
+            campaign.join("bestiary/goblin.csv"),
+            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
+        )
+        .unwrap();
+        campaign
+    }
+
+    #[test]
+    fn test_spawn_creates_npc_with_correct_stats() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_bestiary_campaign(&dir, "spawn_stats");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("spawn goblin Guard");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Spawned Guard"), "Should confirm spawn. Got: {output}");
+
+        let gs = app.game_state().unwrap();
+        let npc = gs.get_npc("Guard").expect("Guard NPC should exist");
+        assert_eq!(npc.get_stat("strength"), Some(8.0));
+        assert_eq!(npc.get_stat("hp_max"), Some(7.0));
+        assert_eq!(npc.get_stat("ac"), Some(15.0));
+        // Resource def should create hp gauge
+        assert!(npc.gauges.contains_key("hp"), "HP gauge should be created from resource_defs");
+        assert_eq!(npc.gauges["hp"].max, 7.0);
+        assert_eq!(npc.gauges["hp"].current, 7.0);
+    }
+
+    #[test]
+    fn test_spawn_auto_names_incrementing() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_bestiary_campaign(&dir, "spawn_autoname");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("spawn goblin");
+        app.dispatch_command("spawn goblin");
+        app.dispatch_command("spawn goblin");
+
+        let gs = app.game_state().unwrap();
+        assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
+        assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
+        assert!(gs.get_npc("Goblin #3").is_some(), "Goblin #3 should exist");
+    }
+
+    #[test]
+    fn test_spawn_unknown_template_error() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_bestiary_campaign(&dir, "spawn_unknown");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("spawn dragon");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("not found"), "Should report template not found. Got: {output}");
+    }
+
+    #[test]
+    fn test_spawn_no_campaign_error() {
+        let mut app = App::new();
+        app.messages.clear();
+
+        app.dispatch_command("spawn goblin");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No campaign loaded"), "Should report no campaign. Got: {output}");
+    }
+
+    #[test]
+    fn test_spawn_no_args_error() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_bestiary_campaign(&dir, "spawn_noargs");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("spawn");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 }
