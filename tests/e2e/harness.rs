@@ -1483,6 +1483,83 @@ KTHXBYE",
         );
     }
 
+    // ---- Show/Set/List E2E tests ----
+
+    #[test]
+    fn test_e2e_show_character_stats() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"ShowTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\"]\n\n[resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+            )
+            .with_player("thorin", "name,strength,hp_max\nThorin,18,52\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("show thorin");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(all_output.contains("Thorin"), "Should show name. Output: {all_output}");
+        assert!(all_output.contains("18"), "Should show strength. Output: {all_output}");
+    }
+
+    #[test]
+    fn test_e2e_set_and_verify() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"SetTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+            )
+            .with_player("hero", "name,strength\nHero,15\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("set hero.strength 20");
+
+        let set_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(set_output.contains("20"), "Set should show new value. Output: {set_output}");
+
+        // Verify with show
+        harness.execute("show hero strength");
+        let show_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(show_output.contains("20"), "Show should confirm change. Output: {show_output}");
+    }
+
+    #[test]
+    fn test_e2e_list_players() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"ListTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+            )
+            .with_player("thorin", "name,strength\nThorin,18\n")
+            .with_player("elara", "name,strength\nElara,8\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("list players");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(all_output.contains("Thorin"), "Should list Thorin. Output: {all_output}");
+        assert!(all_output.contains("Elara"), "Should list Elara. Output: {all_output}");
+    }
+
     // ---- Persistence E2E tests ----
 
     #[test]
