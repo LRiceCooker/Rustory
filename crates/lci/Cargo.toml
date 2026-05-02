@@ -1,0 +1,12 @@
+[package]
+name = "lci"
+version = "0.2.0"
+edition = "2021"
+description = "A LOLCODE interpreter written in Rust (vendored fork of rust-lci)"
+license = "MIT"
+
+[dependencies]
+thiserror = "1"
+
+[features]
+debug = []
