@@ -9,6 +9,7 @@ use ratatui::DefaultTerminal;
 
 use crate::audio::library::SoundLibrary;
 use crate::audio::player::AudioPlayer;
+use crate::persistence::PersistenceLayer;
 use crate::commands::dispatcher::{self, CommandResult, StyledLine};
 use crate::commands::mapping;
 use crate::game_state::loader;
@@ -58,6 +59,7 @@ pub struct App {
     pub world_map: Option<WorldMap>,
     pub audio_player: Option<AudioPlayer>,
     pub sound_library: SoundLibrary,
+    pub persistence: Option<PersistenceLayer>,
 }
 
 impl Default for App {
@@ -88,6 +90,7 @@ impl App {
             world_map: None,
             audio_player: AudioPlayer::new().ok(),
             sound_library: SoundLibrary::default(),
+            persistence: None,
         }
     }
 
@@ -115,6 +118,18 @@ impl App {
         // Load SoundLibrary from sound/ if present (optional)
         let sound_dir = path.join("sound");
         self.sound_library = SoundLibrary::scan(&sound_dir).unwrap_or_default();
+
+        // Initialize git persistence (creates .git/ if missing, commits manual edits)
+        match PersistenceLayer::init(path) {
+            Ok(pl) => {
+                // Auto-commit any manual edits detected
+                let _ = pl.commit_manual_edits();
+                self.persistence = Some(pl);
+            }
+            Err(_) => {
+                self.persistence = None;
+            }
+        }
 
         errors
     }
@@ -3157,5 +3172,86 @@ mod tests {
         // If audio device is available, no track should give empty string
         // If no audio device, also empty string
         assert_eq!(app.sound_status_indicator(), "");
+    }
+
+    // --- Git persistence on campaign load tests ---
+
+    #[test]
+    fn test_load_campaign_creates_git_repo() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("git_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"GitTest\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // .git/ should be created
+        assert!(campaign.join(".git").exists(), ".git/ should be created on load");
+        assert!(app.persistence.is_some(), "Persistence layer should be initialized");
+    }
+
+    #[test]
+    fn test_load_campaign_opens_existing_git_repo() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("git_existing");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"GitTest\"\n",
+        )
+        .unwrap();
+
+        // First load creates .git/
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        assert!(campaign.join(".git").exists());
+
+        // Second load should open existing
+        app.load_campaign(&campaign);
+        assert!(app.persistence.is_some());
+    }
+
+    #[test]
+    fn test_load_campaign_commits_manual_edits() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("manual_edit");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"ManualTest\"\n",
+        )
+        .unwrap();
+
+        // First load: initializes git
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // Simulate manual edit: modify a file outside the app
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"ManualTest Modified\"\n",
+        )
+        .unwrap();
+
+        // Second load: should detect and commit the manual edit
+        app.load_campaign(&campaign);
+
+        // Verify git history has the manual edit commit
+        if let Some(ref pl) = app.persistence {
+            let history = pl.history(10).unwrap();
+            assert!(
+                history.iter().any(|h| h.message.contains("Manual edit")),
+                "Should have a manual edit commit. History: {:?}",
+                history.iter().map(|h| &h.message).collect::<Vec<_>>()
+            );
+        }
     }
 }
