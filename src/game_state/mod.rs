@@ -1,27 +1,9 @@
+pub mod character;
 pub mod primitives;
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone)]
-pub struct Character {
-    pub name: String,
-    pub stats: HashMap<String, f64>,
-}
-
-impl Character {
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            stats: HashMap::new(),
-        }
-    }
-
-    pub fn with_stat(mut self, name: &str, value: f64) -> Self {
-        self.stats.insert(name.to_string(), value);
-        self
-    }
-}
+pub use character::Character;
 
 #[derive(Debug)]
 pub struct GameState {
@@ -98,21 +80,21 @@ mod tests {
 
         assert_eq!(gs.players.len(), 1);
         assert_eq!(gs.players[0].name, "Thorin");
-        assert_eq!(gs.players[0].stats["strength"], 18.0);
-        assert_eq!(gs.players[0].stats["dexterity"], 12.0);
+        assert_eq!(gs.players[0].get_stat("strength"), Some(18.0));
+        assert_eq!(gs.players[0].get_stat("dexterity"), Some(12.0));
     }
 
     #[test]
     fn test_add_npc() {
         let mut gs = GameState::new(Path::new("/tmp/test"));
         let goblin = Character::new("Goblin King")
-            .with_stat("hp", 45.0)
-            .with_stat("ac", 15.0);
+            .with_stat("ac", 15.0)
+            .with_gauge("hp", 45.0);
         gs.add_npc(goblin);
 
         assert_eq!(gs.npcs.len(), 1);
         assert_eq!(gs.npcs[0].name, "Goblin King");
-        assert_eq!(gs.npcs[0].stats["hp"], 45.0);
+        assert_eq!(gs.npcs[0].get_gauge("hp").unwrap().current, 45.0);
     }
 
     #[test]
@@ -136,11 +118,11 @@ mod tests {
 
         let thorin = gs.get_player("Thorin");
         assert!(thorin.is_some());
-        assert_eq!(thorin.unwrap().stats["strength"], 18.0);
+        assert_eq!(thorin.unwrap().get_stat("strength"), Some(18.0));
 
         let elara = gs.get_player("Elara");
         assert!(elara.is_some());
-        assert_eq!(elara.unwrap().stats["intelligence"], 20.0);
+        assert_eq!(elara.unwrap().get_stat("intelligence"), Some(20.0));
 
         assert!(gs.get_player("Nobody").is_none());
     }
@@ -148,7 +130,7 @@ mod tests {
     #[test]
     fn test_get_npc() {
         let mut gs = GameState::new(Path::new("/tmp/test"));
-        gs.add_npc(Character::new("Goblin King").with_stat("hp", 45.0));
+        gs.add_npc(Character::new("Goblin King").with_gauge("hp", 45.0));
 
         assert!(gs.get_npc("Goblin King").is_some());
         assert!(gs.get_npc("Ghost").is_none());
@@ -168,8 +150,8 @@ mod tests {
             .with_stat("dex", 14.0)
             .with_stat("con", 12.0);
         assert_eq!(c.stats.len(), 3);
-        assert_eq!(c.stats["str"], 10.0);
-        assert_eq!(c.stats["dex"], 14.0);
-        assert_eq!(c.stats["con"], 12.0);
+        assert_eq!(c.get_stat("str"), Some(10.0));
+        assert_eq!(c.get_stat("dex"), Some(14.0));
+        assert_eq!(c.get_stat("con"), Some(12.0));
     }
 }

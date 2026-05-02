@@ -162,8 +162,8 @@ impl Threshold {
     }
 
     pub fn matches(&self, value: i32) -> bool {
-        let above_min = self.min.map_or(true, |m| value >= m);
-        let below_max = self.max.map_or(true, |m| value <= m);
+        let above_min = self.min.is_none_or(|m| value >= m);
+        let below_max = self.max.is_none_or(|m| value <= m);
         above_min && below_max
     }
 }

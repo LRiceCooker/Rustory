@@ -24,6 +24,12 @@ pub struct App {
     pub rng: Box<dyn RngCore>,
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         Self::with_rng(Box::new(rand::thread_rng()))
