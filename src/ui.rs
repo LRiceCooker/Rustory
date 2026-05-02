@@ -34,14 +34,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         .map(|msg| Line::from(Span::styled(msg.text.clone(), msg.style)))
         .collect();
 
-    // Calculate scroll: auto-scroll to bottom
-    // Inner height = chunk height - 2 (borders)
+    // Calculate scroll: auto-scroll to bottom, offset by user scroll
     let inner_height = chunks[1].height.saturating_sub(2) as usize;
-    let scroll = if lines.len() > inner_height {
+    let max_scroll = if lines.len() > inner_height {
         (lines.len() - inner_height) as u16
     } else {
         0
     };
+    let scroll = max_scroll.saturating_sub(app.scroll_offset).min(max_scroll);
 
     let main_area = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL))

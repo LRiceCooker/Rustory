@@ -20,6 +20,7 @@ pub struct App {
     pub messages: Vec<Message>,
     pub command_history: Vec<String>,
     pub history_index: Option<usize>,
+    pub scroll_offset: u16,
 }
 
 impl App {
@@ -32,6 +33,7 @@ impl App {
             messages: Vec::new(),
             command_history: Vec::new(),
             history_index: None,
+            scroll_offset: 0,
         }
     }
 
@@ -62,6 +64,8 @@ impl App {
             (KeyCode::Delete, _) => self.delete_char_at(),
             (KeyCode::Up, _) => self.history_prev(),
             (KeyCode::Down, _) => self.history_next(),
+            (KeyCode::PageUp, _) => self.scroll_up(10),
+            (KeyCode::PageDown, _) => self.scroll_down(10),
             (KeyCode::Left, _) => self.move_cursor_left(),
             (KeyCode::Right, _) => self.move_cursor_right(),
             (KeyCode::Home, _) => self.cursor_position = 0,
@@ -81,6 +85,7 @@ impl App {
         self.last_command = Some(input.clone());
         self.command_history.push(input.clone());
         self.history_index = None;
+        self.scroll_offset = 0;
 
         // Echo the command in DarkGray
         self.messages.push(Message {
@@ -153,6 +158,14 @@ impl App {
             }
             None => {}
         }
+    }
+
+    fn scroll_up(&mut self, amount: u16) {
+        self.scroll_offset = self.scroll_offset.saturating_add(amount);
+    }
+
+    fn scroll_down(&mut self, amount: u16) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
     }
 
     pub fn autocomplete_hint(&self) -> Option<String> {
@@ -471,5 +484,32 @@ mod tests {
         app.running = true;
         app.on_key(KeyEvent::from(KeyCode::Up));
         assert_eq!(app.input, "");
+    }
+
+    #[test]
+    fn test_scroll_up_down() {
+        let mut app = App::new();
+        app.on_key(KeyEvent::from(KeyCode::PageUp));
+        assert_eq!(app.scroll_offset, 10);
+        app.on_key(KeyEvent::from(KeyCode::PageUp));
+        assert_eq!(app.scroll_offset, 20);
+        app.on_key(KeyEvent::from(KeyCode::PageDown));
+        assert_eq!(app.scroll_offset, 10);
+        app.on_key(KeyEvent::from(KeyCode::PageDown));
+        assert_eq!(app.scroll_offset, 0);
+        // Can't go below 0
+        app.on_key(KeyEvent::from(KeyCode::PageDown));
+        assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn test_scroll_resets_on_submit() {
+        let mut app = App::new();
+        app.running = true;
+        app.scroll_offset = 20;
+        app.input = "help".to_string();
+        app.cursor_position = 4;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.scroll_offset, 0);
     }
 }
