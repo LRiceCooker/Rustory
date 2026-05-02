@@ -295,6 +295,10 @@ impl App {
             self.handle_spawn_command(args);
             return;
         }
+        if command == mapping::ENCOUNTER {
+            self.handle_encounter_command(args);
+            return;
+        }
         // Hybrid dispatch: built-in first, then custom commands, then unknown
         let custom_commands = self
             .game_state
@@ -447,7 +451,8 @@ impl App {
             StyledLine::plain("  redo     — re-apply the last undone change"),
             StyledLine::plain("  sound    — play audio (e.g. sound play ambiance/tavern.mp3)"),
             StyledLine::plain("  bestiary — list creature templates (e.g. bestiary info goblin)"),
-            StyledLine::plain("  spawn    — create NPC from bestiary (e.g. spawn goblin)"),
+            StyledLine::plain("  spawn     — create NPC from bestiary (e.g. spawn goblin)"),
+            StyledLine::plain("  encounter — spawn an encounter group (e.g. encounter goblin patrol)"),
             StyledLine::plain("  validate — check campaign files against schemas"),
             StyledLine::plain("  quit     — exit Rustory"),
         ];
@@ -1906,6 +1911,163 @@ impl App {
             format!("Spawned {npc_name_display} from bestiary template \"{template_name}\"."),
             Style::default().fg(Color::Green),
         )]));
+    }
+
+    fn handle_encounter_command(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: encounter <name> (e.g. encounter goblin patrol)".to_string(),
+            ));
+            return;
+        }
+
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let encounter = match crate::bestiary::find_encounter(&gs.bestiary_encounters, args) {
+            Some(e) => e.clone(),
+            None => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Encounter \"{args}\" not found."
+                )));
+                return;
+            }
+        };
+
+        let mut spawned_names: Vec<String> = Vec::new();
+        let mut errors: Vec<String> = Vec::new();
+
+        for creature_def in &encounter.creatures {
+            // Look up the bestiary template
+            let gs = self.game_state.as_ref().unwrap();
+            let entry = match crate::bestiary::find_entry(&gs.bestiary_entries, &creature_def.template) {
+                Some(e) => e.clone(),
+                None => {
+                    errors.push(format!(
+                        "Template \"{}\" not found in bestiary.",
+                        creature_def.template
+                    ));
+                    continue;
+                }
+            };
+
+            for i in 0..creature_def.count {
+                // Determine name: use name_override for count=1, otherwise auto-name
+                let npc_name = if let Some(ref override_name) = creature_def.name_override {
+                    if creature_def.count == 1 {
+                        override_name.clone()
+                    } else {
+                        format!("{override_name} #{}", i + 1)
+                    }
+                } else {
+                    // Auto-name: "Goblin #N" with incrementing counter
+                    let base = &entry.name;
+                    let mut counter = 1u32;
+                    loop {
+                        let candidate = format!("{base} #{counter}");
+                        let gs = self.game_state.as_ref().unwrap();
+                        if gs.get_npc(&candidate).is_none() {
+                            break candidate;
+                        }
+                        counter += 1;
+                    }
+                };
+
+                let mut character = crate::game_state::Character::new(&npc_name);
+                for stat in &entry.stats {
+                    character.stats.push(stat.clone());
+                }
+
+                // Apply resource_defs (gauges/pools) from rules
+                let gs = self.game_state.as_ref().unwrap();
+                if let Some(rules) = &gs.rules {
+                    for def in &rules.resource_defs {
+                        match def {
+                            crate::rules::loader::ResourceDef::Gauge { name, max_stat } => {
+                                if !character.gauges.contains_key(name) {
+                                    let max_val = character.get_stat(max_stat).unwrap_or(0.0);
+                                    if max_val > 0.0 {
+                                        character.gauges.insert(
+                                            name.clone(),
+                                            crate::game_state::primitives::Gauge::new(name, max_val),
+                                        );
+                                    }
+                                }
+                            }
+                            crate::rules::loader::ResourceDef::Pool {
+                                name,
+                                max,
+                                resets_on,
+                            } => {
+                                if !character.pools.contains_key(name) {
+                                    character.pools.insert(
+                                        name.clone(),
+                                        crate::game_state::primitives::Pool::new(
+                                            name,
+                                            *max,
+                                            resets_on.clone(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Persist to disk if persistence + schema available
+                let schema = gs.schema.clone();
+                let description = format!("Spawned {} from encounter {}", npc_name, encounter.name);
+                if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &schema) {
+                    if let Err(e) = pl.persist_character(&character, false, schema, &description) {
+                        errors.push(format!("Failed to persist {npc_name}: {e}"));
+                    }
+                }
+
+                spawned_names.push(npc_name.clone());
+                self.game_state.as_mut().unwrap().add_npc(character);
+            }
+        }
+
+        // Build output
+        let mut lines: Vec<StyledLine> = Vec::new();
+        if !encounter.description.is_empty() {
+            lines.push(StyledLine::new(
+                encounter.description.clone(),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+        if !spawned_names.is_empty() {
+            lines.push(StyledLine::new(
+                format!(
+                    "Encounter \"{}\" spawned {} creature(s): {}",
+                    encounter.name,
+                    spawned_names.len(),
+                    spawned_names.join(", ")
+                ),
+                Style::default().fg(Color::Green),
+            ));
+        }
+        for err in &errors {
+            lines.push(StyledLine::new(
+                err.clone(),
+                Style::default().fg(Color::Red),
+            ));
+        }
+        if spawned_names.is_empty() && errors.is_empty() {
+            lines.push(StyledLine::new(
+                format!("Encounter \"{}\" has no creatures to spawn.", encounter.name),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
     }
 
     fn handle_history_command(&mut self, args: &str) {
@@ -4892,5 +5054,188 @@ mod tests {
 
         let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    // --- Encounter command tests ---
+
+    fn setup_encounter_campaign(dir: &TempDir, name: &str) -> std::path::PathBuf {
+        let campaign = dir.path().join(name);
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n\
+             [character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n\n\
+             [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("bestiary/encounters")).unwrap();
+        std::fs::write(
+            campaign.join("bestiary/goblin.csv"),
+            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign.join("bestiary/orc.csv"),
+            "name,strength,hp_max,ac\nOrc,16,15,13\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign.join("bestiary/encounters/goblin_patrol.toml"),
+            "[encounter]\nname = \"Goblin Patrol\"\n\
+             description = \"A small group of goblins on the road\"\n\n\
+             [[creatures]]\ntemplate = \"goblin\"\ncount = 3\n\n\
+             [[creatures]]\ntemplate = \"orc\"\ncount = 1\n\
+             name_override = \"Orc Chieftain\"\n",
+        )
+        .unwrap();
+        campaign
+    }
+
+    #[test]
+    fn test_encounter_spawns_correct_creatures() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_encounter_campaign(&dir, "enc_spawn");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("encounter goblin patrol");
+
+        let gs = app.game_state().unwrap();
+        // Should have 3 goblins + 1 orc chieftain = 4 NPCs
+        assert_eq!(gs.npcs.len(), 4, "Should spawn 4 NPCs. Got: {:?}", gs.npcs.iter().map(|n| &n.name).collect::<Vec<_>>());
+
+        assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
+        assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
+        assert!(gs.get_npc("Goblin #3").is_some(), "Goblin #3 should exist");
+        assert!(gs.get_npc("Orc Chieftain").is_some(), "Orc Chieftain should exist");
+    }
+
+    #[test]
+    fn test_encounter_creatures_have_correct_stats() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_encounter_campaign(&dir, "enc_stats");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+
+        app.dispatch_command("encounter goblin patrol");
+
+        let gs = app.game_state().unwrap();
+        let goblin = gs.get_npc("Goblin #1").unwrap();
+        assert_eq!(goblin.get_stat("strength"), Some(8.0));
+        assert_eq!(goblin.get_stat("hp_max"), Some(7.0));
+        assert_eq!(goblin.get_stat("ac"), Some(15.0));
+        assert!(goblin.gauges.contains_key("hp"), "HP gauge should be created");
+        assert_eq!(goblin.gauges["hp"].max, 7.0);
+
+        let orc = gs.get_npc("Orc Chieftain").unwrap();
+        assert_eq!(orc.get_stat("strength"), Some(16.0));
+        assert_eq!(orc.get_stat("hp_max"), Some(15.0));
+        assert_eq!(orc.get_stat("ac"), Some(13.0));
+        assert!(orc.gauges.contains_key("hp"));
+        assert_eq!(orc.gauges["hp"].max, 15.0);
+    }
+
+    #[test]
+    fn test_encounter_output_shows_summary() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_encounter_campaign(&dir, "enc_output");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("encounter goblin patrol");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Goblin Patrol"), "Should show encounter name. Got: {output}");
+        assert!(output.contains("4 creature(s)"), "Should show count. Got: {output}");
+        assert!(output.contains("A small group of goblins"), "Should show description. Got: {output}");
+    }
+
+    #[test]
+    fn test_encounter_not_found_error() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_encounter_campaign(&dir, "enc_notfound");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("encounter dragon horde");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("not found"), "Should report not found. Got: {output}");
+    }
+
+    #[test]
+    fn test_encounter_no_campaign_error() {
+        let mut app = App::new();
+        app.messages.clear();
+
+        app.dispatch_command("encounter goblin patrol");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No campaign loaded"), "Should report no campaign. Got: {output}");
+    }
+
+    #[test]
+    fn test_encounter_no_args_error() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_encounter_campaign(&dir, "enc_noargs");
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("encounter");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_encounter_unknown_template_partial_spawn() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("enc_partial");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n\
+             [character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n\n\
+             [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("bestiary/encounters")).unwrap();
+        std::fs::write(
+            campaign.join("bestiary/goblin.csv"),
+            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
+        )
+        .unwrap();
+        // Encounter references a template that doesn't exist
+        std::fs::write(
+            campaign.join("bestiary/encounters/mixed.toml"),
+            "[encounter]\nname = \"Mixed\"\n\n\
+             [[creatures]]\ntemplate = \"goblin\"\ncount = 2\n\n\
+             [[creatures]]\ntemplate = \"dragon\"\ncount = 1\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("encounter mixed");
+
+        let gs = app.game_state().unwrap();
+        // Should still spawn the 2 goblins even though dragon template is missing
+        assert_eq!(gs.npcs.len(), 2, "Should spawn goblins despite missing dragon template");
+        assert!(gs.get_npc("Goblin #1").is_some());
+        assert!(gs.get_npc("Goblin #2").is_some());
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("dragon"), "Should report missing template. Got: {output}");
     }
 }

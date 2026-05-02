@@ -211,6 +211,11 @@ impl ScriptContext {
             c.borrow_mut().rustory_spawn(args)
         });
 
+        let c = ctx.clone();
+        engine.register("RUSTORY_ENCOUNTER", Some(1), move |args| {
+            c.borrow_mut().rustory_encounter(args)
+        });
+
         // --- Input ---
         let c = ctx.clone();
         engine.register("RUSTORY_ASK", Some(1), move |args| {
@@ -766,6 +771,102 @@ impl ScriptContext {
         self.output.push(format!("Spawned {result_name} from bestiary."));
 
         Value::Yarn(result_name)
+    }
+
+    /// RUSTORY_ENCOUNTER(encounter_name) -> Numbr (count of spawned creatures)
+    /// Spawn all creatures defined in an encounter TOML.
+    fn rustory_encounter(&mut self, args: Vec<Value>) -> Value {
+        if args.is_empty() {
+            return Value::Noob;
+        }
+
+        let encounter_name = value_to_string(&args[0]);
+
+        let encounter = match crate::bestiary::find_encounter(
+            &self.game_state.bestiary_encounters,
+            &encounter_name,
+        ) {
+            Some(e) => e.clone(),
+            None => return Value::Noob,
+        };
+
+        let mut spawned_count = 0i64;
+
+        for creature_def in &encounter.creatures {
+            let entry = match crate::bestiary::find_entry(
+                &self.game_state.bestiary_entries,
+                &creature_def.template,
+            ) {
+                Some(e) => e.clone(),
+                None => continue,
+            };
+
+            for i in 0..creature_def.count {
+                let npc_name = if let Some(ref override_name) = creature_def.name_override {
+                    if creature_def.count == 1 {
+                        override_name.clone()
+                    } else {
+                        format!("{override_name} #{}", i + 1)
+                    }
+                } else {
+                    let base = &entry.name;
+                    let mut counter = 1u32;
+                    loop {
+                        let candidate = format!("{base} #{counter}");
+                        if self.game_state.get_npc(&candidate).is_none() {
+                            break candidate;
+                        }
+                        counter += 1;
+                    }
+                };
+
+                let mut character = Character::new(&npc_name);
+                for stat in &entry.stats {
+                    character.stats.push(stat.clone());
+                }
+
+                // Apply resource_defs (gauges/pools) from rules
+                if let Some(rules) = &self.game_state.rules {
+                    for def in &rules.resource_defs {
+                        match def {
+                            crate::rules::loader::ResourceDef::Gauge { name, max_stat } => {
+                                if !character.gauges.contains_key(name) {
+                                    let max_val = character.get_stat(max_stat).unwrap_or(0.0);
+                                    if max_val > 0.0 {
+                                        character.gauges.insert(
+                                            name.clone(),
+                                            crate::game_state::primitives::Gauge::new(name, max_val),
+                                        );
+                                    }
+                                }
+                            }
+                            crate::rules::loader::ResourceDef::Pool {
+                                name,
+                                max,
+                                resets_on,
+                            } => {
+                                if !character.pools.contains_key(name) {
+                                    character.pools.insert(
+                                        name.clone(),
+                                        crate::game_state::primitives::Pool::new(
+                                            name,
+                                            *max,
+                                            resets_on.clone(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                self.output.push(format!("Spawned {} from encounter.", npc_name));
+                self.game_state.add_npc(character);
+                spawned_count += 1;
+            }
+        }
+
+        Value::Numbr(spawned_count)
     }
 
     // --- Input ---
@@ -1834,6 +1935,81 @@ KTHXBYE",
         let mut ctx = ScriptContext::new(gs, make_rng());
 
         let result = ctx.rustory_spawn(vec![]);
+        assert_eq!(result, Value::Noob);
+    }
+
+    // ---- Encounter ----
+
+    fn make_game_state_with_encounters() -> GameState {
+        let mut gs = make_game_state_with_bestiary();
+        // Add orc entry
+        gs.bestiary_entries.push(crate::bestiary::BestiaryEntry {
+            name: "Orc".to_string(),
+            stats: vec![
+                crate::game_state::primitives::Stat::new("strength", 16.0),
+                crate::game_state::primitives::Stat::new("hp_max", 15.0),
+                crate::game_state::primitives::Stat::new("ac", 13.0),
+            ],
+        });
+        gs.bestiary_encounters = vec![crate::bestiary::Encounter {
+            name: "Goblin Patrol".to_string(),
+            description: "A small group of goblins".to_string(),
+            creatures: vec![
+                crate::bestiary::EncounterCreature {
+                    template: "Goblin Warrior".to_string(),
+                    count: 2,
+                    name_override: None,
+                },
+                crate::bestiary::EncounterCreature {
+                    template: "Orc".to_string(),
+                    count: 1,
+                    name_override: Some("Orc Chieftain".to_string()),
+                },
+            ],
+        }];
+        gs
+    }
+
+    #[test]
+    fn test_rustory_encounter_spawns_all_creatures() {
+        let gs = make_game_state_with_encounters();
+        let initial_npcs = gs.npcs.len();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+
+        let result = ctx.rustory_encounter(vec![Value::Yarn("Goblin Patrol".to_string())]);
+        assert_eq!(result, Value::Numbr(3));
+        assert_eq!(ctx.game_state.npcs.len(), initial_npcs + 3);
+    }
+
+    #[test]
+    fn test_rustory_encounter_auto_names() {
+        let gs = make_game_state_with_encounters();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+
+        ctx.rustory_encounter(vec![Value::Yarn("Goblin Patrol".to_string())]);
+
+        assert!(ctx.game_state.get_npc("Goblin Warrior #1").is_some());
+        assert!(ctx.game_state.get_npc("Goblin Warrior #2").is_some());
+        assert!(ctx.game_state.get_npc("Orc Chieftain").is_some());
+    }
+
+    #[test]
+    fn test_rustory_encounter_unknown_name() {
+        let gs = make_game_state_with_encounters();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+        let initial_npcs = ctx.game_state.npcs.len();
+
+        let result = ctx.rustory_encounter(vec![Value::Yarn("Dragon Horde".to_string())]);
+        assert_eq!(result, Value::Noob);
+        assert_eq!(ctx.game_state.npcs.len(), initial_npcs);
+    }
+
+    #[test]
+    fn test_rustory_encounter_no_args() {
+        let gs = make_game_state_with_encounters();
+        let mut ctx = ScriptContext::new(gs, make_rng());
+
+        let result = ctx.rustory_encounter(vec![]);
         assert_eq!(result, Value::Noob);
     }
 }
