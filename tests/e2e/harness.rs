@@ -781,6 +781,79 @@ mod tests {
         assert!(saw_miss, "Miss tier should be reachable");
     }
 
+    // --- Phase 11 E2E: new command integration ---
+
+    #[test]
+    fn test_e2e_new_campaign_from_dnd_basic() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("test_campaign");
+
+        let mut harness = TestHarness::new();
+
+        // Create a new campaign from the dnd_basic fixture
+        harness.execute(&format!(
+            "new {} tests/e2e/fixtures/dnd_basic",
+            dest.display()
+        ));
+
+        // Verify success output
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_output.contains("created"),
+            "Should show creation success. Output: {all_output}"
+        );
+
+        // Verify new folder structure
+        assert!(dest.join("rules/system.toml").exists(), "rules/system.toml should exist");
+        assert!(dest.join("players").exists(), "players/ should exist");
+        assert!(dest.join("npc").exists(), "npc/ should exist");
+        assert!(dest.join("notes").exists(), "notes/ should exist");
+
+        // Players dir should be empty (not copied from template)
+        let player_entries: Vec<_> = std::fs::read_dir(dest.join("players"))
+            .unwrap()
+            .collect();
+        assert!(player_entries.is_empty(), "players/ should be empty");
+
+        // Now load the new campaign and verify rules match
+        harness.execute(&format!("load {}", dest.display()));
+
+        let gs = harness.game_state().expect("new campaign should load");
+        let rules = gs.rules.as_ref().expect("rules should be loaded");
+        assert_eq!(rules.system_name, "D&D 5e");
+        assert_eq!(rules.stat_names.len(), 6);
+        assert_eq!(rules.checks.len(), 2);
+
+        // No characters in the new campaign (empty players/npc dirs)
+        assert!(gs.players.is_empty());
+        assert!(gs.npcs.is_empty());
+    }
+
+    #[test]
+    fn test_e2e_new_campaign_rules_match_original() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("copy_campaign");
+
+        let mut harness = TestHarness::new();
+        harness.execute(&format!(
+            "new {} tests/e2e/fixtures/dnd_basic",
+            dest.display()
+        ));
+
+        // Read system.toml from both original and copy
+        let original = std::fs::read_to_string("tests/e2e/fixtures/dnd_basic/rules/system.toml")
+            .expect("original system.toml should exist");
+        let copied = std::fs::read_to_string(dest.join("rules/system.toml"))
+            .expect("copied system.toml should exist");
+
+        assert_eq!(original, copied, "system.toml should be identical");
+    }
+
     // --- Phase 11 E2E: load command integration ---
 
     #[test]
