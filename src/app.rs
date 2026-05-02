@@ -8,6 +8,7 @@ pub struct App {
     pub running: bool,
     pub input: String,
     pub cursor_position: usize,
+    pub last_command: Option<String>,
 }
 
 impl App {
@@ -16,6 +17,7 @@ impl App {
             running: false,
             input: String::new(),
             cursor_position: 0,
+            last_command: None,
         }
     }
 
@@ -40,6 +42,7 @@ impl App {
         match (key.code, key.modifiers) {
             (KeyCode::Esc, _) => self.running = false,
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => self.running = false,
+            (KeyCode::Enter, _) => self.submit_input(),
             (KeyCode::Char(c), _) => self.insert_char(c),
             (KeyCode::Backspace, _) => self.delete_char_before(),
             (KeyCode::Delete, _) => self.delete_char_at(),
@@ -49,6 +52,15 @@ impl App {
             (KeyCode::End, _) => self.cursor_position = self.input.len(),
             _ => {}
         }
+    }
+
+    fn submit_input(&mut self) {
+        let input = self.input.trim().to_string();
+        if !input.is_empty() {
+            self.last_command = Some(input);
+        }
+        self.input.clear();
+        self.cursor_position = 0;
     }
 
     fn insert_char(&mut self, c: char) {
@@ -230,6 +242,27 @@ mod tests {
         app.on_key(KeyEvent::from(KeyCode::Char('b')));
         assert_eq!(app.input, "abc");
         assert_eq!(app.cursor_position, 2);
+    }
+
+    #[test]
+    fn test_enter_clears_input_and_stores_command() {
+        let mut app = App::new();
+        app.running = true;
+        app.on_key(KeyEvent::from(KeyCode::Char('h')));
+        app.on_key(KeyEvent::from(KeyCode::Char('i')));
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.input, "");
+        assert_eq!(app.cursor_position, 0);
+        assert_eq!(app.last_command, Some("hi".to_string()));
+    }
+
+    #[test]
+    fn test_enter_on_empty_input() {
+        let mut app = App::new();
+        app.running = true;
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.input, "");
+        assert_eq!(app.last_command, None);
     }
 
     #[test]
