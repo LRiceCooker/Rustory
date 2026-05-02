@@ -138,6 +138,33 @@ mod tests {
     }
 
     #[test]
+    fn test_sample_scripts_parse_correctly() {
+        let sample_path = std::path::Path::new("sample");
+        let commands = load_custom_commands(sample_path);
+        assert!(
+            commands.contains_key("smite"),
+            "smite.lol should be loaded from sample/rules/commands/"
+        );
+        assert!(
+            commands.contains_key("heal"),
+            "heal.lol should be loaded from sample/rules/commands/"
+        );
+        assert!(
+            commands.contains_key("perception"),
+            "perception.lol should be loaded from sample/rules/commands/"
+        );
+        // Verify all scripts parse without errors
+        for (name, script) in &commands {
+            let result = lci::parse(&script.source);
+            assert!(
+                result.is_ok(),
+                "sample script '{name}' failed to parse: {:?}",
+                result.err()
+            );
+        }
+    }
+
+    #[test]
     fn test_ignores_subdirectories() {
         let dir = tempfile::TempDir::new().unwrap();
         let commands_dir = dir.path().join("rules").join("commands");

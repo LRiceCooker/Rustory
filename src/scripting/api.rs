@@ -1463,4 +1463,138 @@ KTHXBYE",
     fn test_value_to_f64_noob() {
         assert_eq!(value_to_f64(&Value::Noob), 0.0);
     }
+
+    // ---- Sample script integration tests ----
+
+    fn make_sample_game_state() -> GameState {
+        // Matches sample/ campaign: Thorin (player) and Goblin King (NPC) with D&D rules
+        let mut gs = GameState::new(Path::new("sample"));
+        gs.add_player(
+            Character::new("Thorin")
+                .with_stat("strength", 18.0)
+                .with_stat("dexterity", 12.0)
+                .with_stat("constitution", 16.0)
+                .with_stat("intelligence", 10.0)
+                .with_stat("wisdom", 13.0)
+                .with_stat("charisma", 8.0)
+                .with_stat("hp_max", 52.0)
+                .with_stat("ac", 18.0)
+                .with_gauge("hp", 52.0)
+                .with_pool("spell_slots", 4.0, ResetTrigger::LongRest),
+        );
+        gs.add_npc(
+            Character::new("Goblin King")
+                .with_stat("strength", 16.0)
+                .with_stat("dexterity", 14.0)
+                .with_stat("constitution", 14.0)
+                .with_stat("intelligence", 12.0)
+                .with_stat("wisdom", 11.0)
+                .with_stat("charisma", 10.0)
+                .with_stat("hp_max", 45.0)
+                .with_stat("ac", 17.0)
+                .with_gauge("hp", 45.0),
+        );
+        gs.rules = Some(CampaignRules {
+            system_name: "D&D 5e Basic".to_string(),
+            system_version: Some("1.0".to_string()),
+            stat_names: vec![
+                "strength".into(),
+                "dexterity".into(),
+                "constitution".into(),
+                "intelligence".into(),
+                "wisdom".into(),
+                "charisma".into(),
+            ],
+            derived: vec![
+                Derived::new("ac", "10 + modifier(dexterity)"),
+                Derived::new("initiative", "modifier(dexterity)"),
+            ],
+            checks: vec![Check::new(
+                "ability_check",
+                "1d20 + modifier({ability})",
+                ResolutionMode::RollOver,
+            )],
+            modifier_defs: vec![],
+            resource_defs: vec![ResourceDef::Gauge {
+                name: "hp".to_string(),
+                max_stat: "hp_max".to_string(),
+            }],
+        });
+        gs
+    }
+
+    #[test]
+    fn test_sample_smite_executes_without_error() {
+        let source = std::fs::read_to_string("sample/rules/commands/smite.lol").unwrap();
+        let ctx = Rc::new(RefCell::new(ScriptContext::new(
+            make_sample_game_state(),
+            Box::new(StdRng::seed_from_u64(42)),
+        )));
+        let mut engine = ScriptEngine::new();
+        ScriptContext::register_api(ctx.clone(), &mut engine);
+        let result = engine.execute(&source);
+        assert!(result.is_ok(), "smite.lol failed: {:?}", result.err());
+        // Should produce RUSTORY_DISPLAY output (hit or miss message)
+        let output = ctx.borrow().output.clone();
+        assert!(
+            !output.is_empty(),
+            "smite.lol should produce display output"
+        );
+        assert!(
+            output[0].contains("SMITE"),
+            "smite output should mention SMITE: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_sample_heal_executes_without_error() {
+        let source = std::fs::read_to_string("sample/rules/commands/heal.lol").unwrap();
+        let ctx = Rc::new(RefCell::new(ScriptContext::new(
+            make_sample_game_state(),
+            Box::new(StdRng::seed_from_u64(42)),
+        )));
+        let mut engine = ScriptEngine::new();
+        ScriptContext::register_api(ctx.clone(), &mut engine);
+        let result = engine.execute(&source);
+        assert!(result.is_ok(), "heal.lol failed: {:?}", result.err());
+        let output = ctx.borrow().output.clone();
+        assert!(
+            !output.is_empty(),
+            "heal.lol should produce display output"
+        );
+        assert!(
+            output[0].contains("Heal") || output[0].contains("spell"),
+            "heal output should mention healing or spell slots: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_sample_perception_executes_without_error() {
+        let source =
+            std::fs::read_to_string("sample/rules/commands/perception.lol").unwrap();
+        let ctx = Rc::new(RefCell::new(ScriptContext::new(
+            make_sample_game_state(),
+            Box::new(StdRng::seed_from_u64(42)),
+        )));
+        let mut engine = ScriptEngine::new();
+        ScriptContext::register_api(ctx.clone(), &mut engine);
+        let result = engine.execute(&source);
+        assert!(
+            result.is_ok(),
+            "perception.lol failed: {:?}",
+            result.err()
+        );
+        let output = ctx.borrow().output.clone();
+        assert!(
+            !output.is_empty(),
+            "perception.lol should produce display output"
+        );
+        assert!(
+            output[0].contains("perception") || output[0].contains("Thorin"),
+            "perception output should mention the check: {:?}",
+            output
+        );
+    }
 }
