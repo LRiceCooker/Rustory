@@ -202,6 +202,22 @@ impl TestCampaign {
         self
     }
 
+    /// Add a bestiary creature CSV to bestiary/<name>.csv
+    pub fn with_bestiary_creature(self, name: &str, csv: &str) -> Self {
+        let bestiary_dir = self.dir.path().join("bestiary");
+        fs::create_dir_all(&bestiary_dir).unwrap();
+        fs::write(bestiary_dir.join(format!("{name}.csv")), csv).unwrap();
+        self
+    }
+
+    /// Add an encounter TOML to bestiary/encounters/<name>.toml
+    pub fn with_encounter(self, name: &str, toml: &str) -> Self {
+        let enc_dir = self.dir.path().join("bestiary/encounters");
+        fs::create_dir_all(&enc_dir).unwrap();
+        fs::write(enc_dir.join(format!("{name}.toml")), toml).unwrap();
+        self
+    }
+
     pub fn with_map(self, json: &str) -> Self {
         let map_dir = self.dir.path().join("map");
         fs::create_dir_all(&map_dir).unwrap();
@@ -1651,6 +1667,202 @@ KTHXBYE",
         assert!(
             all_output.contains("Nothing to redo"),
             "Should report nothing to redo. Output: {all_output}"
+        );
+    }
+
+    // ---- Phase 19 E2E: Bestiary & encounter system ----
+
+    fn bestiary_system_toml() -> &'static str {
+        "[system]\nname = \"BestiaryTest\"\n\n\
+         [character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n\n\
+         [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n"
+    }
+
+    fn bestiary_test_campaign() -> TestCampaign {
+        TestCampaign::new()
+            .with_system_toml(bestiary_system_toml())
+            .with_bestiary_creature("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
+            .with_bestiary_creature("orc", "name,strength,hp_max,ac\nOrc,16,15,13\n")
+            .with_encounter(
+                "goblin_patrol",
+                "[encounter]\nname = \"Goblin Patrol\"\n\
+                 description = \"A small group of goblins on the road\"\n\n\
+                 [[creatures]]\ntemplate = \"goblin\"\ncount = 3\n\n\
+                 [[creatures]]\ntemplate = \"orc\"\ncount = 1\n\
+                 name_override = \"Orc Chieftain\"\n",
+            )
+    }
+
+    #[test]
+    fn test_e2e_bestiary_list_shows_creatures() {
+        let campaign = bestiary_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("bestiary list");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Goblin"),
+            "Should list Goblin. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Orc"),
+            "Should list Orc. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("HP: 7"),
+            "Should show Goblin HP. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("AC: 15"),
+            "Should show Goblin AC. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_spawn_creates_npc() {
+        let campaign = bestiary_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("spawn goblin");
+
+        // Verify output confirms spawn
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_output.contains("Spawned") && all_output.contains("Goblin"),
+            "Should confirm spawn. Output: {all_output}"
+        );
+
+        // Verify NPC created in game state with auto-name "Goblin #1"
+        let gs = harness.game_state().expect("game state should exist");
+        let npc = gs.get_npc("Goblin #1").expect("Goblin #1 should exist");
+        assert_eq!(npc.get_stat("strength"), Some(8.0));
+        assert_eq!(npc.get_stat("hp_max"), Some(7.0));
+        assert_eq!(npc.get_stat("ac"), Some(15.0));
+
+        // Verify HP gauge created from resource_defs
+        assert!(npc.gauges.contains_key("hp"), "HP gauge should exist");
+        assert_eq!(npc.gauges["hp"].current, 7.0);
+        assert_eq!(npc.gauges["hp"].max, 7.0);
+    }
+
+    #[test]
+    fn test_e2e_show_spawned_npc() {
+        let campaign = bestiary_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+
+        // Spawn with a custom name (no spaces) so show can find it
+        harness.execute("spawn goblin Grunt");
+
+        let gs = harness.game_state().expect("game state should exist");
+        assert!(gs.get_npc("Grunt").is_some(), "Grunt should exist in game state");
+
+        harness.execute("show Grunt");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Grunt"),
+            "Show should display NPC name. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("strength") || all_output.contains("8"),
+            "Show should display stats. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("hp"),
+            "Show should display HP gauge. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_spawns_group() {
+        let campaign = bestiary_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter goblin patrol");
+
+        // Verify output
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_output.contains("Goblin Patrol"),
+            "Should mention encounter name. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("4"),
+            "Should mention 4 creatures spawned. Output: {all_output}"
+        );
+
+        // Verify all 4 NPCs created in game state
+        let gs = harness.game_state().expect("game state should exist");
+        assert_eq!(gs.npcs.len(), 4, "Should have 4 NPCs. Got: {:?}",
+            gs.npcs.iter().map(|n| &n.name).collect::<Vec<_>>());
+
+        assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
+        assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
+        assert!(gs.get_npc("Goblin #3").is_some(), "Goblin #3 should exist");
+        assert!(gs.get_npc("Orc Chieftain").is_some(), "Orc Chieftain should exist");
+
+        // Verify stats are correct
+        let goblin = gs.get_npc("Goblin #1").unwrap();
+        assert_eq!(goblin.get_stat("strength"), Some(8.0));
+        assert!(goblin.gauges.contains_key("hp"));
+        assert_eq!(goblin.gauges["hp"].max, 7.0);
+
+        let orc = gs.get_npc("Orc Chieftain").unwrap();
+        assert_eq!(orc.get_stat("strength"), Some(16.0));
+        assert!(orc.gauges.contains_key("hp"));
+        assert_eq!(orc.gauges["hp"].max, 15.0);
+    }
+
+    #[test]
+    fn test_e2e_list_npcs_shows_spawned_creatures() {
+        let campaign = bestiary_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+
+        // Spawn a single goblin, then an encounter group
+        harness.execute("spawn goblin");
+        harness.execute("encounter goblin patrol");
+
+        harness.execute("list npcs");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // The single spawn created "Goblin #1", encounter created "Goblin #2", "#3", "#4", "Orc Chieftain"
+        assert!(
+            all_output.contains("Goblin #1"),
+            "Should list Goblin #1. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Goblin #2"),
+            "Should list Goblin #2. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Orc Chieftain"),
+            "Should list Orc Chieftain. Output: {all_output}"
         );
     }
 }
