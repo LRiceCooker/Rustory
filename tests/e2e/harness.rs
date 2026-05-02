@@ -1059,4 +1059,78 @@ KTHXBYE",
             "Roll should work after loading. Output: {all_output}"
         );
     }
+
+    // --- Phase 13 E2E: combat scenario with smite.lol + help security ---
+
+    #[test]
+    fn test_e2e_smite_reduces_goblin_hp() {
+        let mut harness = TestHarness::from_fixture_with_seed("dnd_basic", 42);
+
+        // Verify Goblin starts at full HP (7)
+        let gs = harness.game_state().expect("game state loaded");
+        let goblin = gs.get_npc("Goblin").expect("Goblin should exist");
+        let initial_hp = goblin.get_gauge("hp").expect("hp gauge should exist").current;
+        assert_eq!(initial_hp, 7.0, "Goblin should start at 7 HP");
+
+        // Execute smite (the dnd_basic fixture has smite.lol)
+        harness.execute("smite");
+
+        // Verify output shows damage message
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_output.contains("smites the Goblin"),
+            "Smite output should mention the attack. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("damage"),
+            "Smite output should mention damage. Output: {all_output}"
+        );
+
+        // Verify Goblin HP decreased
+        let gs = harness.game_state().expect("game state loaded");
+        let goblin = gs.get_npc("Goblin").expect("Goblin should exist");
+        let new_hp = goblin.get_gauge("hp").expect("hp gauge").current;
+        assert!(
+            new_hp < initial_hp,
+            "Goblin HP should decrease. Was {initial_hp}, now {new_hp}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_builtin_help_wins_over_custom_help() {
+        // Create a campaign with a custom command named "help"
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\"]\n",
+            )
+            .with_lol_command(
+                "help",
+                "HAI 1.2\nI IZ RUSTORY_DISPLAY YR \"CUSTOM HELP HIJACKED\" MKAY\nKTHXBYE",
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("help");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Built-in help should show "Available commands", NOT the custom script
+        assert!(
+            all_output.contains("Available commands"),
+            "Built-in help should win. Output: {all_output}"
+        );
+        assert!(
+            !all_output.contains("CUSTOM HELP HIJACKED"),
+            "Custom help should NOT execute. Output: {all_output}"
+        );
+    }
 }

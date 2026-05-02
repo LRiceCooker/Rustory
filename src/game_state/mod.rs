@@ -94,6 +94,40 @@ impl GameState {
             gs.add_npc(npc);
         }
 
+        // Apply resource_defs: create gauges and pools on loaded characters
+        if let Some(rules) = &gs.rules {
+            let resource_defs = rules.resource_defs.clone();
+            for def in &resource_defs {
+                for ch in gs.players.iter_mut().chain(gs.npcs.iter_mut()) {
+                    match def {
+                        rules::loader::ResourceDef::Gauge { name, max_stat } => {
+                            if !ch.gauges.contains_key(name) {
+                                let max_val = ch.get_stat(max_stat).unwrap_or(0.0);
+                                if max_val > 0.0 {
+                                    ch.gauges.insert(
+                                        name.clone(),
+                                        primitives::Gauge::new(name, max_val),
+                                    );
+                                }
+                            }
+                        }
+                        rules::loader::ResourceDef::Pool {
+                            name,
+                            max,
+                            resets_on,
+                        } => {
+                            if !ch.pools.contains_key(name) {
+                                ch.pools.insert(
+                                    name.clone(),
+                                    primitives::Pool::new(name, *max, resets_on.clone()),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Load custom commands from rules/commands/*.lol
         gs.custom_commands = crate::scripting::loader::load_custom_commands(path);
 

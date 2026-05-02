@@ -1,0 +1,7 @@
+HAI 1.2
+BTW smite -- Thorin attacks the Goblin
+I IZ RUSTORY_GET_PLAYER YR "Thorin" MKAY
+I HAS A DMG ITZ I IZ RUSTORY_ROLL YR "2d6" MKAY
+I IZ RUSTORY_DAMAGE YR "Goblin" AN YR DMG MKAY
+I IZ RUSTORY_DISPLAY YR "Thorin smites the Goblin for :{DMG} damage!" MKAY
+KTHXBYE
