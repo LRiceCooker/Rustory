@@ -1,11 +1,12 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::RngCore;
 use ratatui::style::{Color, Style};
 use ratatui::DefaultTerminal;
 
-use crate::commands::dispatcher::{self, CommandResult};
+use crate::commands::dispatcher::{self, CommandResult, StyledLine};
+use crate::commands::mapping;
 use crate::game_state::loader;
 use crate::game_state::GameState;
 use crate::ui;
@@ -136,8 +137,23 @@ impl App {
             style: Style::default().fg(Color::DarkGray),
         });
 
-        // Dispatch and handle the result
+        // Parse command and args for app-level commands
+        let parts: Vec<&str> = input.splitn(2, ' ').collect();
+        let command = parts[0];
+        let args = parts.get(1).unwrap_or(&"").trim();
+
+        // Handle app-level commands that need mutable self
+        if command == mapping::LOAD {
+            self.handle_load_command(args);
+            return;
+        }
+
+        // Dispatch and handle the result via the stateless dispatcher
         let result = dispatcher::dispatch(input, &mut self.rng);
+        self.apply_command_result(result);
+    }
+
+    fn apply_command_result(&mut self, result: CommandResult) {
         match result {
             CommandResult::Output(lines) => {
                 for line in lines {
@@ -163,6 +179,88 @@ impl App {
                 });
             }
         }
+    }
+
+    fn handle_load_command(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: load <path> (e.g. load sample)".to_string(),
+            ));
+            return;
+        }
+
+        let path = PathBuf::from(args);
+
+        // Validate path exists
+        if !path.exists() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Path not found: \"{}\"",
+                path.display()
+            )));
+            return;
+        }
+
+        if !path.is_dir() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "\"{}\" is not a directory.",
+                path.display()
+            )));
+            return;
+        }
+
+        // Validate folder structure: rules/ must exist
+        let rules_dir = path.join("rules");
+        if !rules_dir.exists() || !rules_dir.is_dir() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Campaign folder \"{}\" is missing a rules/ directory.\n  \
+                 A valid campaign must have a rules/ folder containing system.toml.",
+                path.display()
+            )));
+            return;
+        }
+
+        // Load the campaign
+        let (gs, errors) = GameState::load(&path);
+
+        if !errors.is_empty() {
+            // Show all errors, do NOT load the campaign
+            let mut lines = vec![StyledLine::new(
+                format!("Failed to load campaign from \"{}\":", path.display()),
+                Style::default().fg(Color::Red),
+            )];
+            for error in &errors {
+                lines.push(StyledLine::new(
+                    format!("  {error}"),
+                    Style::default().fg(Color::Red),
+                ));
+            }
+            self.apply_command_result(CommandResult::Output(lines));
+            return;
+        }
+
+        // Success — store game state
+        let campaign_name = gs.campaign_name.clone();
+        let player_count = gs.players.len();
+        let npc_count = gs.npcs.len();
+        self.game_state = Some(gs);
+
+        let mut lines = vec![StyledLine::new(
+            format!("Campaign \"{campaign_name}\" loaded successfully."),
+            Style::default().fg(Color::Green),
+        )];
+        lines.push(StyledLine::new(
+            format!("  {player_count} player(s), {npc_count} NPC(s)"),
+            Style::default().fg(Color::Green),
+        ));
+        if let Some(ref gs) = self.game_state {
+            if let Some(ref rules) = gs.rules {
+                lines.push(StyledLine::new(
+                    format!("  System: {}", rules.system_name),
+                    Style::default().fg(Color::Green),
+                ));
+            }
+        }
+        self.apply_command_result(CommandResult::Output(lines));
     }
 
     fn history_prev(&mut self) {
@@ -644,5 +742,128 @@ mod tests {
         app.cursor_position = 4;
         app.on_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    // --- load command tests ---
+
+    #[test]
+    fn test_load_command_valid_campaign() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("my_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+
+        let player_dir = campaign_dir.join("players/hero");
+        std::fs::create_dir_all(&player_dir).unwrap();
+        std::fs::write(player_dir.join("sheet.csv"), "name,strength\nHero,15\n").unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+
+        // Should have game state loaded
+        assert!(app.game_state().is_some());
+        let gs = app.game_state().unwrap();
+        assert_eq!(gs.campaign_name, "my_campaign");
+        assert_eq!(gs.players.len(), 1);
+        assert_eq!(gs.players[0].name, "Hero");
+
+        // Output should contain success message
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts
+            .iter()
+            .any(|t| t.contains("loaded successfully")));
+    }
+
+    #[test]
+    fn test_load_command_no_args() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("load");
+
+        assert!(app.game_state().is_none());
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("Usage")));
+    }
+
+    #[test]
+    fn test_load_command_nonexistent_path() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("load /nonexistent/path/12345");
+
+        assert!(app.game_state().is_none());
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("not found")));
+    }
+
+    #[test]
+    fn test_load_command_missing_rules_dir() {
+        let dir = TempDir::new().unwrap();
+        // Create a dir with no rules/ folder
+        let campaign_dir = dir.path().join("bad_campaign");
+        std::fs::create_dir_all(&campaign_dir).unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+
+        assert!(app.game_state().is_none());
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("rules/")));
+    }
+
+    #[test]
+    fn test_load_command_malformed_csv_shows_error() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("bad_csv_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\", \"dexterity\"]\n",
+        )
+        .unwrap();
+
+        // Create a player with wrong columns (missing dexterity)
+        let player_dir = campaign_dir.join("players/broken");
+        std::fs::create_dir_all(&player_dir).unwrap();
+        std::fs::write(
+            player_dir.join("sheet.csv"),
+            "name,strength\nBroken,10\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+
+        // Should NOT load the campaign
+        assert!(
+            app.game_state().is_none(),
+            "game_state should be None when load fails"
+        );
+        // Error message should mention the missing column
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("dexterity")),
+            "Error should mention the missing column. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_load_command_help_includes_load() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("help");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("load")),
+            "help should list the load command"
+        );
     }
 }
