@@ -60,6 +60,7 @@ pub struct App {
     pub audio_player: Option<AudioPlayer>,
     pub sound_library: SoundLibrary,
     pub persistence: Option<PersistenceLayer>,
+    pub redo_stack: Vec<String>,
 }
 
 impl Default for App {
@@ -91,6 +92,7 @@ impl App {
             audio_player: AudioPlayer::new().ok(),
             sound_library: SoundLibrary::default(),
             persistence: None,
+            redo_stack: Vec::new(),
         }
     }
 
@@ -227,6 +229,19 @@ impl App {
         let command = parts[0];
         let args = parts.get(1).unwrap_or(&"").trim();
 
+        // Handle undo/redo before clearing the stack
+        if command == mapping::UNDO {
+            self.handle_undo_command();
+            return;
+        }
+        if command == mapping::REDO {
+            self.handle_redo_command();
+            return;
+        }
+
+        // Clear redo stack on any non-undo/redo command
+        self.redo_stack.clear();
+
         // Handle app-level commands that need access to App state
         if command == mapping::HELP {
             self.handle_help_command();
@@ -256,7 +271,6 @@ impl App {
             self.handle_validate_command(args);
             return;
         }
-
         // Hybrid dispatch: built-in first, then custom commands, then unknown
         let custom_commands = self
             .game_state
@@ -1334,6 +1348,84 @@ impl App {
         }
 
         self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_undo_command(&mut self) {
+        let pl = match &self.persistence {
+            Some(pl) => pl,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded (no persistence layer).".to_string(),
+                ));
+                return;
+            }
+        };
+
+        match pl.undo() {
+            Ok(hash) => {
+                self.redo_stack.push(hash);
+
+                // Reload game state from files
+                if let Some(gs) = &self.game_state {
+                    let path = gs.campaign_path.clone();
+                    let (new_gs, _) = GameState::load(&path);
+                    self.game_state = Some(new_gs);
+                }
+
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Undo: reverted last change.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            Err(e) => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Cannot undo: {e}"
+                )));
+            }
+        }
+    }
+
+    fn handle_redo_command(&mut self) {
+        let hash = match self.redo_stack.pop() {
+            Some(h) => h,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Nothing to redo.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let pl = match &self.persistence {
+            Some(pl) => pl,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded (no persistence layer).".to_string(),
+                ));
+                return;
+            }
+        };
+
+        match pl.redo(&hash) {
+            Ok(()) => {
+                // Reload game state from files
+                if let Some(gs) = &self.game_state {
+                    let path = gs.campaign_path.clone();
+                    let (new_gs, _) = GameState::load(&path);
+                    self.game_state = Some(new_gs);
+                }
+
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Redo: re-applied last undone change.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            Err(e) => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Cannot redo: {e}"
+                )));
+            }
+        }
     }
 
     fn handle_validate_command(&mut self, args: &str) {
@@ -3449,6 +3541,87 @@ mod tests {
         // Second load should open existing
         app.load_campaign(&campaign);
         assert!(app.persistence.is_some());
+    }
+
+    // --- Undo/Redo tests ---
+
+    #[test]
+    fn test_undo_no_campaign() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("undo");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No campaign") || output.contains("Cannot"), "Should error. Got: {output}");
+    }
+
+    #[test]
+    fn test_redo_nothing_to_redo() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("redo");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Nothing to redo"), "Should report nothing to redo. Got: {output}");
+    }
+
+    #[test]
+    fn test_undo_redo_with_campaign() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("undo_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"UndoTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/hero")).unwrap();
+        std::fs::write(
+            campaign.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // Make a change via persistence
+        if let Some(ref pl) = app.persistence {
+            let schema = app.game_state.as_ref().unwrap().schema.as_ref().unwrap();
+            let mut ch = crate::game_state::Character::new("Hero");
+            ch.stats = vec![crate::game_state::primitives::Stat::new("strength", 20.0)];
+            pl.persist_character(&ch, true, schema, "Strength to 20").unwrap();
+        }
+        app.messages.clear();
+
+        // Undo
+        app.dispatch_command("undo");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Undo") || output.contains("reverted"), "Should undo. Got: {output}");
+
+        // Verify redo stack has an entry
+        assert_eq!(app.redo_stack.len(), 1);
+
+        // Redo
+        app.messages.clear();
+        app.dispatch_command("redo");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Redo") || output.contains("re-applied"), "Should redo. Got: {output}");
+
+        // Redo stack should be empty now
+        assert!(app.redo_stack.is_empty());
+    }
+
+    #[test]
+    fn test_new_command_clears_redo_stack() {
+        let mut app = App::new();
+        app.running = true;
+        app.redo_stack.push("abc123".to_string());
+
+        // Any non-undo/redo command should clear redo stack
+        app.dispatch_command("help");
+        assert!(app.redo_stack.is_empty(), "Redo stack should be cleared after a regular command");
     }
 
     // --- Validate command tests ---
