@@ -17,6 +17,7 @@ pub struct Character {
     pub inventory: Collection,
     pub lore: Option<String>,
     pub dialogues: Option<String>,
+    pub location: Option<String>,
 }
 
 impl Character {
@@ -33,6 +34,7 @@ impl Character {
             inventory: Collection::new("inventory"),
             lore: None,
             dialogues: None,
+            location: None,
         }
     }
 

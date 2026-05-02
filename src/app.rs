@@ -605,6 +605,8 @@ impl App {
             "search" => self.map_search(sub_args),
             "near" => self.map_near(sub_args),
             "route" => self.map_route(sub_args),
+            "where" => self.map_where(sub_args),
+            "move" => self.map_move(sub_args),
             _ => {
                 self.apply_command_result(CommandResult::Error(format!(
                     "Unknown map subcommand \"{subcmd}\". Try: list, info, search, near, route"
@@ -848,6 +850,116 @@ impl App {
                 )]));
             }
         }
+    }
+
+    fn map_where(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: map where <character>".to_string(),
+            ));
+            return;
+        }
+
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let name_lower = args.to_lowercase();
+        let character = gs
+            .players
+            .iter()
+            .chain(gs.npcs.iter())
+            .find(|c| c.name.to_lowercase() == name_lower);
+
+        match character {
+            Some(ch) => match &ch.location {
+                Some(loc) => {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::plain(
+                        format!("{} is at {}.", ch.name, loc),
+                    )]));
+                }
+                None => {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        format!("{} has no known location.", ch.name),
+                        Style::default().fg(Color::Yellow),
+                    )]));
+                }
+            },
+            None => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Character \"{args}\" not found."
+                )));
+            }
+        }
+    }
+
+    fn map_move(&mut self, args: &str) {
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: map move <character> <location>".to_string(),
+            ));
+            return;
+        }
+
+        let char_name = parts[0];
+        let location = parts[1];
+
+        // Validate location exists in the map
+        let world = match &self.world_map {
+            Some(w) => w,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No map loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        if world.get_burg(location).is_none() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Location \"{location}\" not found on the map."
+            )));
+            return;
+        }
+
+        // Find and update the character
+        let gs = match &mut self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let name_lower = char_name.to_lowercase();
+        let character = gs
+            .players
+            .iter_mut()
+            .chain(gs.npcs.iter_mut())
+            .find(|c| c.name.to_lowercase() == name_lower);
+
+        let result = match character {
+            Some(ch) => {
+                let old_loc = ch.location.clone().unwrap_or_else(|| "nowhere".to_string());
+                let ch_name = ch.name.clone();
+                ch.location = Some(location.to_string());
+                CommandResult::Output(vec![StyledLine::new(
+                    format!("{ch_name} moved from {old_loc} to {location}."),
+                    Style::default().fg(Color::Green),
+                )])
+            }
+            None => CommandResult::Error(format!("Character \"{char_name}\" not found.")),
+        };
+        self.apply_command_result(result);
     }
 
     fn handle_search_command(&mut self, args: &str) {
@@ -2163,6 +2275,106 @@ mod tests {
         let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
         assert!(output_texts.iter().any(|t| t.contains("Silver Lake")));
         assert!(output_texts.iter().any(|t| t.contains("Ironhold")));
+    }
+
+    #[test]
+    fn test_map_where_no_location() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("where_test");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign_dir.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign_dir.join("players/thorin/sheet.csv"),
+            "name\nThorin\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign_dir);
+        app.world_map = Some(make_test_world_map());
+        app.messages.clear();
+
+        app.dispatch_command("map where Thorin");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("no known location")),
+            "Should say no location. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_map_move_character() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("move_test");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign_dir.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign_dir.join("players/thorin/sheet.csv"),
+            "name\nThorin\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign_dir);
+        app.world_map = Some(make_test_world_map());
+        app.messages.clear();
+
+        app.dispatch_command("map move Thorin Silverport");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("moved") && t.contains("Silverport")),
+            "Should confirm move. Messages: {output_texts:?}"
+        );
+
+        // Verify location is set
+        let thorin = app.game_state.as_ref().unwrap().get_player("Thorin").unwrap();
+        assert_eq!(thorin.location.as_deref(), Some("Silverport"));
+    }
+
+    #[test]
+    fn test_map_move_invalid_location() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("move_invalid_test");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign_dir.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign_dir.join("players/thorin/sheet.csv"),
+            "name\nThorin\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign_dir);
+        app.world_map = Some(make_test_world_map());
+        app.messages.clear();
+
+        app.dispatch_command("map move Thorin Nowhere");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("not found on the map")),
+            "Should reject invalid location. Messages: {output_texts:?}"
+        );
     }
 
     #[test]
