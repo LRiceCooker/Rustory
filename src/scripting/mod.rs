@@ -3,6 +3,8 @@
 /// This module wraps the vendored `lci` crate (a Rust LOLCODE interpreter)
 /// and provides the callback mechanism for RUSTORY_* API functions.
 
+pub mod engine;
+
 #[cfg(test)]
 mod tests {
     use lci::{capture, types::Value};
