@@ -134,6 +134,9 @@ pub fn dispatch(
         mapping::VALIDATE => {
             CommandResult::Error("validate command must be handled by the app".to_string())
         }
+        mapping::BESTIARY => {
+            CommandResult::Error("bestiary command must be handled by the app".to_string())
+        }
         _ => {
             // Look up in custom commands HashMap
             if let Some(commands) = custom_commands {

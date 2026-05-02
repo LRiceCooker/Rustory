@@ -287,6 +287,10 @@ impl App {
             self.handle_validate_command(args);
             return;
         }
+        if command == mapping::BESTIARY {
+            self.handle_bestiary_command(args);
+            return;
+        }
         // Hybrid dispatch: built-in first, then custom commands, then unknown
         let custom_commands = self
             .game_state
@@ -438,6 +442,7 @@ impl App {
             StyledLine::plain("  undo     — revert the last state change"),
             StyledLine::plain("  redo     — re-apply the last undone change"),
             StyledLine::plain("  sound    — play audio (e.g. sound play ambiance/tavern.mp3)"),
+            StyledLine::plain("  bestiary — list creature templates (e.g. bestiary info goblin)"),
             StyledLine::plain("  validate — check campaign files against schemas"),
             StyledLine::plain("  quit     — exit Rustory"),
         ];
@@ -1695,6 +1700,90 @@ impl App {
             other => {
                 self.apply_command_result(CommandResult::Error(format!(
                     "Unknown list type \"{other}\". Try: players, npcs"
+                )));
+            }
+        }
+    }
+
+    fn handle_bestiary_command(&mut self, args: &str) {
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let sub_cmd = if args.is_empty() { "list" } else { parts[0] };
+        let sub_args = parts.get(1).unwrap_or(&"").trim();
+
+        match sub_cmd {
+            "list" => {
+                if gs.bestiary_entries.is_empty() {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        "No creature templates in bestiary.".to_string(),
+                        Style::default().fg(Color::Yellow),
+                    )]));
+                    return;
+                }
+                let mut lines = vec![StyledLine::new(
+                    "Bestiary:".to_string(),
+                    Style::default().fg(Color::Cyan),
+                )];
+                for entry in &gs.bestiary_entries {
+                    let hp_str = entry
+                        .stats
+                        .iter()
+                        .find(|s| s.name == "hp_max")
+                        .map(|s| format!(" HP: {}", s.value as i64))
+                        .unwrap_or_default();
+                    let ac_str = entry
+                        .stats
+                        .iter()
+                        .find(|s| s.name == "ac")
+                        .map(|s| format!(" AC: {}", s.value as i64))
+                        .unwrap_or_default();
+                    lines.push(StyledLine::plain(format!(
+                        "  {}{hp_str}{ac_str}",
+                        entry.name
+                    )));
+                }
+                self.apply_command_result(CommandResult::Output(lines));
+            }
+            "info" => {
+                if sub_args.is_empty() {
+                    self.apply_command_result(CommandResult::Error(
+                        "Usage: bestiary info <name>".to_string(),
+                    ));
+                    return;
+                }
+                match crate::bestiary::find_entry(&gs.bestiary_entries, sub_args) {
+                    Some(entry) => {
+                        let mut lines = vec![StyledLine::new(
+                            entry.name.clone(),
+                            Style::default().fg(Color::Cyan),
+                        )];
+                        for stat in &entry.stats {
+                            lines.push(StyledLine::plain(format!(
+                                "  {}: {}",
+                                stat.name, stat.value
+                            )));
+                        }
+                        self.apply_command_result(CommandResult::Output(lines));
+                    }
+                    None => {
+                        self.apply_command_result(CommandResult::Error(format!(
+                            "Creature \"{sub_args}\" not found in bestiary."
+                        )));
+                    }
+                }
+            }
+            other => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Unknown bestiary subcommand \"{other}\". Try: list, info"
                 )));
             }
         }
@@ -4381,5 +4470,202 @@ mod tests {
                 history.iter().map(|h| &h.message).collect::<Vec<_>>()
             );
         }
+    }
+
+    // --- Bestiary command tests ---
+
+    #[test]
+    fn test_bestiary_no_campaign() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("bestiary");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No campaign"), "Should report no campaign. Got: {output}");
+    }
+
+    #[test]
+    fn test_bestiary_list_empty() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("bestiary_empty");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("bestiary");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No creature templates"), "Should report empty bestiary. Got: {output}");
+    }
+
+    #[test]
+    fn test_bestiary_list_shows_creatures() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("bestiary_list");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
+        std::fs::write(
+            campaign.join("bestiary/goblin.csv"),
+            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign.join("bestiary/orc.csv"),
+            "name,strength,hp_max,ac\nOrc,16,15,13\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("bestiary list");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Goblin"), "Should list Goblin. Got: {output}");
+        assert!(output.contains("Orc"), "Should list Orc. Got: {output}");
+        assert!(output.contains("HP: 7"), "Should show Goblin HP. Got: {output}");
+        assert!(output.contains("AC: 15"), "Should show Goblin AC. Got: {output}");
+    }
+
+    #[test]
+    fn test_bestiary_info_shows_stats() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("bestiary_info");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
+        std::fs::write(
+            campaign.join("bestiary/goblin.csv"),
+            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("bestiary info goblin");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Goblin"), "Should show creature name. Got: {output}");
+        assert!(output.contains("strength"), "Should show strength stat. Got: {output}");
+        assert!(output.contains("8"), "Should show strength value. Got: {output}");
+        assert!(output.contains("hp_max"), "Should show hp_max stat. Got: {output}");
+        assert!(output.contains("7"), "Should show hp_max value. Got: {output}");
+    }
+
+    #[test]
+    fn test_bestiary_info_case_insensitive() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("bestiary_case");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
+        std::fs::write(
+            campaign.join("bestiary/goblin.csv"),
+            "name,strength\nGoblin,8\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("bestiary info GOBLIN");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Goblin"), "Should find Goblin case-insensitively. Got: {output}");
+    }
+
+    #[test]
+    fn test_bestiary_info_not_found() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("bestiary_nf");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("bestiary info dragon");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("not found"), "Should report not found. Got: {output}");
+    }
+
+    #[test]
+    fn test_bestiary_info_no_args() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("bestiary_noargs");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("bestiary info");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_bestiary_unknown_subcommand() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("bestiary_bad");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("bestiary foo");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Unknown bestiary subcommand"), "Should report unknown subcommand. Got: {output}");
     }
 }
