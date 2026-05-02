@@ -158,7 +158,11 @@ impl App {
         let command = parts[0];
         let args = parts.get(1).unwrap_or(&"").trim();
 
-        // Handle app-level commands that need mutable self
+        // Handle app-level commands that need access to App state
+        if command == mapping::HELP {
+            self.handle_help_command();
+            return;
+        }
         if command == mapping::LOAD {
             self.handle_load_command(args);
             return;
@@ -199,6 +203,66 @@ impl App {
                 });
             }
         }
+    }
+
+    fn handle_help_command(&mut self) {
+        let mut lines = vec![
+            StyledLine::plain("Available commands:"),
+            StyledLine::plain("  help  — show this help"),
+            StyledLine::plain("  load  — load a campaign folder (e.g. load sample)"),
+            StyledLine::plain("  new   — create a new campaign from a template (e.g. new my_game sample)"),
+            StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
+            StyledLine::plain("  quit  — exit Rustory"),
+        ];
+
+        // Campaign status
+        match &self.game_state {
+            Some(gs) => {
+                lines.push(StyledLine::new(String::new(), Style::default()));
+                lines.push(StyledLine::new(
+                    format!("Campaign: {} (loaded)", gs.campaign_name),
+                    Style::default().fg(Color::Green),
+                ));
+                if let Some(ref rules) = gs.rules {
+                    lines.push(StyledLine::new(
+                        format!("  System: {}", rules.system_name),
+                        Style::default().fg(Color::Green),
+                    ));
+                }
+
+                // List custom commands from rules/commands/*.lol if any
+                let commands_dir = gs.campaign_path.join("rules/commands");
+                if commands_dir.exists() {
+                    let mut custom_cmds: Vec<String> = Vec::new();
+                    if let Ok(entries) = std::fs::read_dir(&commands_dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.extension().and_then(|e| e.to_str()) == Some("lol") {
+                                if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
+                                    custom_cmds.push(name.to_string());
+                                }
+                            }
+                        }
+                    }
+                    custom_cmds.sort();
+                    if !custom_cmds.is_empty() {
+                        lines.push(StyledLine::new(
+                            format!("  Custom commands: {}", custom_cmds.join(", ")),
+                            Style::default().fg(Color::Green),
+                        ));
+                    }
+                }
+            }
+            None => {
+                lines.push(StyledLine::new(String::new(), Style::default()));
+                lines.push(StyledLine::new(
+                    "No campaign loaded. Use \"load <path>\" to load one.".to_string(),
+                    Style::default().fg(Color::Yellow),
+                ));
+            }
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
     }
 
     fn handle_load_command(&mut self, args: &str) {
@@ -1174,5 +1238,92 @@ mod tests {
         assert!(output_texts
             .iter()
             .any(|t| t.contains("already exists")));
+    }
+
+    // --- help command campaign status tests ---
+
+    #[test]
+    fn test_help_shows_no_campaign_when_not_loaded() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("help");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts
+                .iter()
+                .any(|t| t.contains("No campaign loaded")),
+            "help should show 'No campaign loaded'. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_help_shows_campaign_status_when_loaded() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("test_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test System\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+        app.messages.clear();
+
+        app.dispatch_command("help");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts
+                .iter()
+                .any(|t| t.contains("test_campaign") && t.contains("loaded")),
+            "help should show campaign name. Messages: {output_texts:?}"
+        );
+        assert!(
+            output_texts
+                .iter()
+                .any(|t| t.contains("Test System")),
+            "help should show system name. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_help_shows_custom_commands_when_available() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("cmd_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules/commands")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"CMD Test\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/smite.lol"),
+            "HAI 1.2\nKTHXBYE\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/heal.lol"),
+            "HAI 1.2\nKTHXBYE\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+        app.messages.clear();
+
+        app.dispatch_command("help");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts
+                .iter()
+                .any(|t| t.contains("heal") && t.contains("smite")),
+            "help should list custom commands. Messages: {output_texts:?}"
+        );
     }
 }

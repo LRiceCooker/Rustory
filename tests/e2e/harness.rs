@@ -204,8 +204,13 @@ mod tests {
     fn test_harness_execute_help() {
         let mut harness = TestHarness::new();
         harness.execute("help");
-        let output = harness.last_output().unwrap();
-        assert!(output.contains("help") || output.contains("quit") || output.contains("roll"));
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(all_output.contains("help") && all_output.contains("quit") && all_output.contains("roll"));
     }
 
     #[test]
@@ -286,8 +291,13 @@ mod tests {
 
         // Verify help command works
         harness.execute("help");
-        let output = harness.last_output().unwrap();
-        assert!(output.contains("help") || output.contains("quit") || output.contains("roll"));
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(all_output.contains("help") && all_output.contains("quit") && all_output.contains("roll"));
     }
 
     #[test]
