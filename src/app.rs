@@ -11,6 +11,22 @@ use crate::game_state::loader;
 use crate::game_state::GameState;
 use crate::ui;
 
+/// Recursively copy a directory and all its contents.
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            std::fs::copy(&src_path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct Message {
     pub text: String,
@@ -147,6 +163,10 @@ impl App {
             self.handle_load_command(args);
             return;
         }
+        if command == mapping::NEW {
+            self.handle_new_command(args);
+            return;
+        }
 
         // Dispatch and handle the result via the stateless dispatcher
         let result = dispatcher::dispatch(input, &mut self.rng);
@@ -261,6 +281,109 @@ impl App {
             }
         }
         self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_new_command(&mut self, args: &str) {
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        if parts.len() < 2 || parts[0].is_empty() || parts[1].trim().is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: new <name> <template_path> (e.g. new my_game sample)".to_string(),
+            ));
+            return;
+        }
+
+        let name = parts[0];
+        let template_path = PathBuf::from(parts[1].trim());
+
+        // Validate template exists
+        if !template_path.exists() || !template_path.is_dir() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Template not found: \"{}\"",
+                template_path.display()
+            )));
+            return;
+        }
+
+        // Validate template has rules/
+        let template_rules = template_path.join("rules");
+        if !template_rules.exists() || !template_rules.is_dir() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Template \"{}\" is missing a rules/ directory.",
+                template_path.display()
+            )));
+            return;
+        }
+
+        // Validate template by loading its rules
+        let system_toml = template_rules.join("system.toml");
+        if system_toml.exists() {
+            if let Err(errors) = crate::rules::loader::load_rules(&system_toml) {
+                let mut lines = vec![StyledLine::new(
+                    format!(
+                        "Template \"{}\" has invalid rules:",
+                        template_path.display()
+                    ),
+                    Style::default().fg(Color::Red),
+                )];
+                for error in &errors {
+                    lines.push(StyledLine::new(
+                        format!("  {error}"),
+                        Style::default().fg(Color::Red),
+                    ));
+                }
+                self.apply_command_result(CommandResult::Output(lines));
+                return;
+            }
+        }
+
+        // Check destination doesn't already exist
+        let dest = PathBuf::from(name);
+        if dest.exists() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Destination \"{name}\" already exists."
+            )));
+            return;
+        }
+
+        // Create the new campaign
+        if let Err(e) = Self::create_campaign_from_template(&dest, &template_path) {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Failed to create campaign: {e}"
+            )));
+            return;
+        }
+
+        self.apply_command_result(CommandResult::Output(vec![
+            StyledLine::new(
+                format!("Campaign \"{name}\" created from template \"{}\".", template_path.display()),
+                Style::default().fg(Color::Green),
+            ),
+            StyledLine::new(
+                format!("  Use \"load {name}\" to start playing."),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+    }
+
+    fn create_campaign_from_template(dest: &Path, template: &Path) -> std::io::Result<()> {
+        // Copy rules/ as-is
+        copy_dir_recursive(&template.join("rules"), &dest.join("rules"))?;
+
+        // Create empty data directories
+        std::fs::create_dir_all(dest.join("players"))?;
+        std::fs::create_dir_all(dest.join("npc"))?;
+        std::fs::create_dir_all(dest.join("notes"))?;
+
+        // Copy optional template directories if they exist
+        let optional_dirs = ["map", "sound", "bestiary"];
+        for dir_name in &optional_dirs {
+            let src = template.join(dir_name);
+            if src.exists() && src.is_dir() {
+                copy_dir_recursive(&src, &dest.join(dir_name))?;
+            }
+        }
+
+        Ok(())
     }
 
     fn history_prev(&mut self) {
@@ -865,5 +988,191 @@ mod tests {
             output_texts.iter().any(|t| t.contains("load")),
             "help should list the load command"
         );
+    }
+
+    // --- new command tests ---
+
+    #[test]
+    fn test_new_command_creates_campaign() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a template
+        let template_dir = dir.path().join("template");
+        std::fs::create_dir_all(template_dir.join("rules")).unwrap();
+        std::fs::write(
+            template_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test System\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(template_dir.join("players/hero")).unwrap();
+        std::fs::write(
+            template_dir.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let dest = dir.path().join("new_campaign");
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!(
+            "new {} {}",
+            dest.display(),
+            template_dir.display()
+        ));
+
+        // New campaign should exist with correct structure
+        assert!(dest.join("rules/system.toml").exists());
+        assert!(dest.join("players").exists());
+        assert!(dest.join("npc").exists());
+        assert!(dest.join("notes").exists());
+
+        // rules/ should be copied as-is
+        let system_toml = std::fs::read_to_string(dest.join("rules/system.toml")).unwrap();
+        assert!(system_toml.contains("Test System"));
+
+        // players/ should be empty (not copied from template)
+        let player_entries: Vec<_> = std::fs::read_dir(dest.join("players"))
+            .unwrap()
+            .collect();
+        assert!(
+            player_entries.is_empty(),
+            "players/ should be empty in new campaign"
+        );
+
+        // Output should show success
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("created")));
+    }
+
+    #[test]
+    fn test_new_command_rules_match_template() {
+        let dir = TempDir::new().unwrap();
+
+        let template_dir = dir.path().join("template");
+        std::fs::create_dir_all(template_dir.join("rules/commands")).unwrap();
+        std::fs::write(
+            template_dir.join("rules/system.toml"),
+            "[system]\nname = \"My System\"\nversion = \"2.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            template_dir.join("rules/commands/test.lol"),
+            "HAI 1.2\nKTHXBYE\n",
+        )
+        .unwrap();
+
+        let dest = dir.path().join("new_game");
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!(
+            "new {} {}",
+            dest.display(),
+            template_dir.display()
+        ));
+
+        // rules/ fully copied including subdirectories
+        assert!(dest.join("rules/system.toml").exists());
+        assert!(dest.join("rules/commands/test.lol").exists());
+
+        let original = std::fs::read_to_string(template_dir.join("rules/system.toml")).unwrap();
+        let copied = std::fs::read_to_string(dest.join("rules/system.toml")).unwrap();
+        assert_eq!(original, copied);
+    }
+
+    #[test]
+    fn test_new_command_no_args() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("new");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("Usage")));
+    }
+
+    #[test]
+    fn test_new_command_missing_template() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("new my_game /nonexistent/template/12345");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("not found")));
+    }
+
+    #[test]
+    fn test_new_command_invalid_template_missing_rules() {
+        let dir = TempDir::new().unwrap();
+        let bad_template = dir.path().join("bad_template");
+        std::fs::create_dir_all(&bad_template).unwrap();
+
+        let dest = dir.path().join("new_campaign");
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!(
+            "new {} {}",
+            dest.display(),
+            bad_template.display()
+        ));
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("rules/")));
+        assert!(!dest.exists(), "campaign should not be created");
+    }
+
+    #[test]
+    fn test_new_command_invalid_template_bad_rules() {
+        let dir = TempDir::new().unwrap();
+        let bad_template = dir.path().join("bad_rules_template");
+        std::fs::create_dir_all(bad_template.join("rules")).unwrap();
+        std::fs::write(
+            bad_template.join("rules/system.toml"),
+            "[system]\nname = 42\n",
+        )
+        .unwrap();
+
+        let dest = dir.path().join("new_campaign");
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!(
+            "new {} {}",
+            dest.display(),
+            bad_template.display()
+        ));
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("invalid")),
+            "Should report invalid rules. Messages: {output_texts:?}"
+        );
+        assert!(!dest.exists(), "campaign should not be created");
+    }
+
+    #[test]
+    fn test_new_command_dest_already_exists() {
+        let dir = TempDir::new().unwrap();
+
+        let template_dir = dir.path().join("template");
+        std::fs::create_dir_all(template_dir.join("rules")).unwrap();
+        std::fs::write(
+            template_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+
+        let dest = dir.path().join("existing");
+        std::fs::create_dir_all(&dest).unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!(
+            "new {} {}",
+            dest.display(),
+            template_dir.display()
+        ));
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts
+            .iter()
+            .any(|t| t.contains("already exists")));
     }
 }
