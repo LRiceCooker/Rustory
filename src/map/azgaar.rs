@@ -352,6 +352,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_sample_world_json() {
+        let json = std::fs::read_to_string("sample/map/world.json").unwrap();
+        let map = parse_azgaar_json(&json).unwrap();
+        assert_eq!(map.info.map_name, "Thornlands");
+        assert_eq!(map.pack.burgs.len(), 7); // sentinel + 6 burgs
+        assert_eq!(map.pack.states.len(), 3); // sentinel + 2 states
+        assert_eq!(map.pack.burgs[1].name, "Thornwall");
+        assert_eq!(map.pack.burgs[1].capital, 1);
+    }
+
+    #[test]
     fn test_province_parsing() {
         let json = r##"{"pack": {"provinces": [{"i": 0, "name": ""}, {"i": 1, "name": "Northern March", "state": 1, "capital": 5, "area": 12000}]}}"##;
         let map = parse_azgaar_json(json).unwrap();

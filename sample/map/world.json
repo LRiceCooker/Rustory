@@ -1,0 +1,60 @@
+{
+  "info": {
+    "version": "1.0",
+    "mapName": "Thornlands",
+    "width": 1200,
+    "height": 800,
+    "seed": "42"
+  },
+  "pack": {
+    "burgs": [
+      {"i": 0, "name": ""},
+      {"i": 1, "name": "Thornwall", "x": 400.0, "y": 300.0, "population": 35.0, "culture": 1, "state": 1, "type": "City", "capital": 1, "port": 0, "citadel": 1, "walls": 1},
+      {"i": 2, "name": "Harborreach", "x": 200.0, "y": 500.0, "population": 22.0, "culture": 1, "state": 1, "type": "City", "capital": 0, "port": 1, "citadel": 0, "walls": 1},
+      {"i": 3, "name": "Ironpeak", "x": 700.0, "y": 200.0, "population": 15.0, "culture": 2, "state": 1, "type": "Town", "capital": 0, "port": 0, "citadel": 1, "walls": 0},
+      {"i": 4, "name": "Misthollow", "x": 900.0, "y": 400.0, "population": 8.0, "culture": 2, "state": 2, "type": "Town", "capital": 1, "port": 0, "citadel": 0, "walls": 0},
+      {"i": 5, "name": "Reedmere", "x": 300.0, "y": 600.0, "population": 3.0, "culture": 1, "state": 1, "type": "Village", "capital": 0, "port": 0, "citadel": 0, "walls": 0},
+      {"i": 6, "name": "Shadowfen", "x": 1000.0, "y": 550.0, "population": 5.0, "culture": 3, "state": 2, "type": "Village", "capital": 0, "port": 0, "citadel": 0, "walls": 0}
+    ],
+    "states": [
+      {"i": 0, "name": ""},
+      {"i": 1, "name": "Kingdom of Thorns", "form": "Monarchy", "color": "#4a90d9", "capital": 1, "area": 50000, "rural": 200, "urban": 120, "neighbors": [2]},
+      {"i": 2, "name": "Mistlands", "form": "Theocracy", "color": "#8b4a8b", "capital": 4, "area": 30000, "rural": 80, "urban": 40, "neighbors": [1]}
+    ],
+    "provinces": [
+      {"i": 0, "name": ""},
+      {"i": 1, "name": "Crown Province", "state": 1, "capital": 1, "area": 25000},
+      {"i": 2, "name": "Coastal March", "state": 1, "capital": 2, "area": 15000},
+      {"i": 3, "name": "Mistland Proper", "state": 2, "capital": 4, "area": 20000}
+    ],
+    "cultures": [
+      {"i": 0, "name": ""},
+      {"i": 1, "name": "Thornfolk", "type": "River", "color": "#4a7fbf"},
+      {"i": 2, "name": "Mountain Clans", "type": "Highland", "color": "#8b6b3f"},
+      {"i": 3, "name": "Fenborn", "type": "Wetland", "color": "#3f8b5c"}
+    ],
+    "religions": [
+      {"i": 0, "name": ""},
+      {"i": 1, "name": "The Everflame", "type": "Organized", "deity": "Solara"},
+      {"i": 2, "name": "Old Ways", "type": "Folk", "deity": ""}
+    ],
+    "rivers": [
+      {"i": 1, "name": "Thornrun", "source": 300, "mouth": 100, "discharge": 55.0, "length": 180.0},
+      {"i": 2, "name": "Mistwater", "source": 500, "mouth": 200, "discharge": 30.0, "length": 120.0}
+    ],
+    "routes": [
+      {"i": 1, "points": [{"x": 400.0, "y": 300.0}, {"x": 350.0, "y": 400.0}, {"x": 200.0, "y": 500.0}], "group": "roads", "length": 250.0},
+      {"i": 2, "points": [{"x": 400.0, "y": 300.0}, {"x": 550.0, "y": 250.0}, {"x": 700.0, "y": 200.0}], "group": "roads", "length": 320.0},
+      {"i": 3, "points": [{"x": 200.0, "y": 500.0}, {"x": 250.0, "y": 550.0}, {"x": 300.0, "y": 600.0}], "group": "trails", "length": 120.0},
+      {"i": 4, "points": [{"x": 700.0, "y": 200.0}, {"x": 800.0, "y": 300.0}, {"x": 900.0, "y": 400.0}], "group": "roads", "length": 280.0}
+    ],
+    "markers": [
+      {"i": 1, "icon": "ruins", "x": 600.0, "y": 450.0, "type": "ruins"},
+      {"i": 2, "icon": "danger", "x": 850.0, "y": 600.0, "type": "danger"}
+    ],
+    "zones": [
+      {"i": 1, "name": "The Darkwood", "type": "danger", "color": "#3a3a3a"},
+      {"i": 2, "name": "Royal Hunting Grounds", "type": "territory", "color": "#4a90d9"}
+    ]
+  }
+}
