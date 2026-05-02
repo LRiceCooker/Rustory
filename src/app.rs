@@ -252,6 +252,10 @@ impl App {
             self.handle_sound_command(args);
             return;
         }
+        if command == mapping::VALIDATE {
+            self.handle_validate_command(args);
+            return;
+        }
 
         // Hybrid dispatch: built-in first, then custom commands, then unknown
         let custom_commands = self
@@ -397,8 +401,9 @@ impl App {
                 "  new   — create a new campaign from a template (e.g. new my_game sample)",
             ),
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
-            StyledLine::plain("  sound — play audio (e.g. sound play ambiance/tavern.mp3)"),
-            StyledLine::plain("  quit  — exit Rustory"),
+            StyledLine::plain("  sound    — play audio (e.g. sound play ambiance/tavern.mp3)"),
+            StyledLine::plain("  validate — check campaign files against schemas"),
+            StyledLine::plain("  quit     — exit Rustory"),
         ];
 
         // Campaign status
@@ -1329,6 +1334,234 @@ impl App {
         }
 
         self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_validate_command(&mut self, args: &str) {
+        // Determine which path to validate
+        let campaign_path = if !args.is_empty() {
+            PathBuf::from(args)
+        } else if let Some(gs) = &self.game_state {
+            gs.campaign_path.clone()
+        } else {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: validate [path]\nNo campaign loaded. Provide a path or load a campaign first.".to_string(),
+            ));
+            return;
+        };
+
+        if !campaign_path.exists() || !campaign_path.is_dir() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Path not found: \"{}\"",
+                campaign_path.display()
+            )));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::new(
+            format!("Validating campaign: {}", campaign_path.display()),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        let mut pass_count = 0u32;
+        let mut fail_count = 0u32;
+
+        // Validate system.toml
+        let system_toml = campaign_path.join("rules").join("system.toml");
+        if system_toml.exists() {
+            match crate::rules::loader::load_rules(&system_toml) {
+                Ok((_, schema)) => {
+                    lines.push(StyledLine::new(
+                        format!("  \u{2713} rules/system.toml — valid"),
+                        Style::default().fg(Color::Green),
+                    ));
+                    pass_count += 1;
+
+                    // Validate all character CSVs against the schema
+                    let char_schema = &schema.character_schema;
+                    let inv_schema = &schema.inventory_schema;
+
+                    // Scan players/
+                    self.validate_character_dir(
+                        &campaign_path.join("players"),
+                        "players",
+                        char_schema,
+                        inv_schema,
+                        &mut lines,
+                        &mut pass_count,
+                        &mut fail_count,
+                    );
+
+                    // Scan npc/
+                    self.validate_character_dir(
+                        &campaign_path.join("npc"),
+                        "npc",
+                        char_schema,
+                        inv_schema,
+                        &mut lines,
+                        &mut pass_count,
+                        &mut fail_count,
+                    );
+                }
+                Err(errors) => {
+                    lines.push(StyledLine::new(
+                        "\u{2717} rules/system.toml — invalid".to_string(),
+                        Style::default().fg(Color::Red),
+                    ));
+                    for e in errors {
+                        lines.push(StyledLine::new(
+                            format!("    {e}"),
+                            Style::default().fg(Color::Red),
+                        ));
+                    }
+                    fail_count += 1;
+                }
+            }
+        } else {
+            lines.push(StyledLine::new(
+                "  \u{2717} rules/system.toml — missing".to_string(),
+                Style::default().fg(Color::Yellow),
+            ));
+            fail_count += 1;
+        }
+
+        // Validate map/world.json if present
+        let map_json = campaign_path.join("map").join("world.json");
+        if map_json.exists() {
+            match crate::map::world::WorldMap::load(&map_json) {
+                Ok(wm) => {
+                    let burg_count = wm.map.pack.burgs.len().saturating_sub(1);
+                    let state_count = wm.map.pack.states.len().saturating_sub(1);
+                    lines.push(StyledLine::new(
+                        format!("  \u{2713} map/world.json — valid ({burg_count} burgs, {state_count} states)"),
+                        Style::default().fg(Color::Green),
+                    ));
+                    pass_count += 1;
+                }
+                Err(e) => {
+                    lines.push(StyledLine::new(
+                        format!("  \u{2717} map/world.json — {e}"),
+                        Style::default().fg(Color::Red),
+                    ));
+                    fail_count += 1;
+                }
+            }
+        }
+
+        // Summary
+        lines.push(StyledLine::new(
+            format!("{pass_count} passed, {fail_count} failed."),
+            if fail_count > 0 {
+                Style::default().fg(Color::Red)
+            } else {
+                Style::default().fg(Color::Green)
+            },
+        ));
+
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn validate_character_dir(
+        &self,
+        dir: &Path,
+        dir_name: &str,
+        char_schema: &crate::schema::csv_schema::CsvSchema,
+        inv_schema: &crate::schema::csv_schema::CsvSchema,
+        lines: &mut Vec<StyledLine>,
+        pass_count: &mut u32,
+        fail_count: &mut u32,
+    ) {
+        if !dir.exists() {
+            return;
+        }
+
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let sheet = path.join("sheet.csv");
+                if sheet.exists() {
+                    let col_count = char_schema.columns.len();
+                    match crate::schema::csv_schema::validate_csv(&sheet, char_schema) {
+                        Ok(()) => {
+                            lines.push(StyledLine::new(
+                                format!("  \u{2713} {dir_name}/{name}/sheet.csv — {col_count} columns, matches schema"),
+                                Style::default().fg(Color::Green),
+                            ));
+                            *pass_count += 1;
+                        }
+                        Err(errors) => {
+                            lines.push(StyledLine::new(
+                                format!("  \u{2717} {dir_name}/{name}/sheet.csv — validation failed"),
+                                Style::default().fg(Color::Red),
+                            ));
+                            for e in errors {
+                                lines.push(StyledLine::new(
+                                    format!("    {e}"),
+                                    Style::default().fg(Color::Red),
+                                ));
+                            }
+                            *fail_count += 1;
+                        }
+                    }
+                }
+
+                let inv = path.join("inventory.csv");
+                if inv.exists() {
+                    match crate::schema::csv_schema::validate_csv(&inv, inv_schema) {
+                        Ok(()) => {
+                            lines.push(StyledLine::new(
+                                format!("  \u{2713} {dir_name}/{name}/inventory.csv — valid"),
+                                Style::default().fg(Color::Green),
+                            ));
+                            *pass_count += 1;
+                        }
+                        Err(errors) => {
+                            lines.push(StyledLine::new(
+                                format!("  \u{2717} {dir_name}/{name}/inventory.csv — validation failed"),
+                                Style::default().fg(Color::Red),
+                            ));
+                            for e in errors {
+                                lines.push(StyledLine::new(
+                                    format!("    {e}"),
+                                    Style::default().fg(Color::Red),
+                                ));
+                            }
+                            *fail_count += 1;
+                        }
+                    }
+                }
+            } else if path.extension().and_then(|e| e.to_str()) == Some("csv") {
+                // Bulk CSV at root
+                let name = entry.file_name().to_string_lossy().to_string();
+                match crate::schema::csv_schema::validate_csv(&path, char_schema) {
+                    Ok(()) => {
+                        lines.push(StyledLine::new(
+                            format!("  \u{2713} {dir_name}/{name} — valid"),
+                            Style::default().fg(Color::Green),
+                        ));
+                        *pass_count += 1;
+                    }
+                    Err(errors) => {
+                        lines.push(StyledLine::new(
+                            format!("  \u{2717} {dir_name}/{name} — validation failed"),
+                            Style::default().fg(Color::Red),
+                        ));
+                        for e in errors {
+                            lines.push(StyledLine::new(
+                                format!("    {e}"),
+                                Style::default().fg(Color::Red),
+                            ));
+                        }
+                        *fail_count += 1;
+                    }
+                }
+            }
+        }
     }
 
     fn handle_search_command(&mut self, args: &str) {
@@ -3216,6 +3449,94 @@ mod tests {
         // Second load should open existing
         app.load_campaign(&campaign);
         assert!(app.persistence.is_some());
+    }
+
+    // --- Validate command tests ---
+
+    #[test]
+    fn test_validate_clean_campaign() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("valid_camp");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"ValidTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/hero")).unwrap();
+        std::fs::write(
+            campaign.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("validate {}", campaign.display()));
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("\u{2713}"), "Should have pass marks. Got: {output}");
+        assert!(output.contains("0 failed"), "Should have 0 failures. Got: {output}");
+    }
+
+    #[test]
+    fn test_validate_campaign_with_bad_csv() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("bad_camp");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"BadTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\", \"dexterity\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/hero")).unwrap();
+        // Missing "dexterity" column
+        std::fs::write(
+            campaign.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("validate {}", campaign.display()));
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("\u{2717}"), "Should have fail marks. Got: {output}");
+        assert!(!output.contains("0 failed"), "Should have >0 failures. Got: {output}");
+    }
+
+    #[test]
+    fn test_validate_no_campaign_no_args() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("validate");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No campaign loaded") || output.contains("Usage"), "Should report error. Got: {output}");
+    }
+
+    #[test]
+    fn test_validate_loaded_campaign() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("loaded_camp");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"LoadedTest\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // validate without args uses loaded campaign
+        app.dispatch_command("validate");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Validating"), "Should validate loaded campaign. Got: {output}");
     }
 
     #[test]
