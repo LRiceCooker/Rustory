@@ -32,27 +32,36 @@ pub fn render(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(header, chunks[0]);
 
-    // Build output history from messages
-    let lines: Vec<Line> = app
-        .messages
-        .iter()
-        .map(|msg| Line::from(Span::styled(msg.text.clone(), msg.style)))
-        .collect();
-
-    // Calculate scroll: auto-scroll to bottom, offset by user scroll
-    let inner_height = chunks[1].height.saturating_sub(2) as usize;
-    let max_scroll = if lines.len() > inner_height {
-        (lines.len() - inner_height) as u16
+    // Main area: either map canvas or output history
+    if app.map_mode {
+        if let Some(ref world_map) = app.world_map {
+            let mut buf = frame.buffer_mut().clone();
+            crate::map::renderer::render_map(world_map, &app.map_viewport, chunks[1], &mut buf);
+            *frame.buffer_mut() = buf;
+        }
     } else {
-        0
-    };
-    let scroll = max_scroll.saturating_sub(app.scroll_offset).min(max_scroll);
+        // Build output history from messages
+        let lines: Vec<Line> = app
+            .messages
+            .iter()
+            .map(|msg| Line::from(Span::styled(msg.text.clone(), msg.style)))
+            .collect();
 
-    let main_area = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL))
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
-    frame.render_widget(main_area, chunks[1]);
+        // Calculate scroll: auto-scroll to bottom, offset by user scroll
+        let inner_height = chunks[1].height.saturating_sub(2) as usize;
+        let max_scroll = if lines.len() > inner_height {
+            (lines.len() - inner_height) as u16
+        } else {
+            0
+        };
+        let scroll = max_scroll.saturating_sub(app.scroll_offset).min(max_scroll);
+
+        let main_area = Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL))
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0));
+        frame.render_widget(main_area, chunks[1]);
+    }
 
     let mut input_spans = vec![Span::raw(PROMPT.to_string()), Span::raw(app.input.clone())];
     if let Some(hint) = app.autocomplete_hint() {

@@ -106,6 +106,9 @@ pub fn dispatch(
         mapping::SEARCH => {
             CommandResult::Error("search command must be handled by the app".to_string())
         }
+        mapping::MAP => {
+            CommandResult::Error("map command must be handled by the app".to_string())
+        }
         _ => {
             // Look up in custom commands HashMap
             if let Some(commands) = custom_commands {

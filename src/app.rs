@@ -11,6 +11,8 @@ use crate::commands::dispatcher::{self, CommandResult, StyledLine};
 use crate::commands::mapping;
 use crate::game_state::loader;
 use crate::game_state::GameState;
+use crate::map::renderer::MapViewport;
+use crate::map::world::WorldMap;
 use crate::scripting::api::ScriptContext;
 use crate::scripting::engine::ScriptEngine;
 use crate::scripting::loader::LolScript;
@@ -49,6 +51,9 @@ pub struct App {
     pub scroll_offset: u16,
     pub rng: Box<dyn RngCore>,
     pub game_state: Option<GameState>,
+    pub map_mode: bool,
+    pub map_viewport: MapViewport,
+    pub world_map: Option<WorldMap>,
 }
 
 impl Default for App {
@@ -74,6 +79,9 @@ impl App {
             scroll_offset: 0,
             rng,
             game_state: None,
+            map_mode: false,
+            map_viewport: MapViewport::default(),
+            world_map: None,
         }
     }
 
@@ -84,6 +92,20 @@ impl App {
     pub fn load_campaign(&mut self, path: &Path) -> Vec<loader::LoadError> {
         let (gs, errors) = GameState::load(path);
         self.game_state = Some(gs);
+
+        // Load WorldMap from map/world.json if present (optional)
+        let map_json = path.join("map").join("world.json");
+        if map_json.exists() {
+            match WorldMap::load(&map_json) {
+                Ok(wm) => self.world_map = Some(wm),
+                Err(_) => self.world_map = None,
+            }
+        } else {
+            self.world_map = None;
+        }
+        self.map_mode = false;
+        self.map_viewport = MapViewport::default();
+
         errors
     }
 
@@ -113,6 +135,23 @@ impl App {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
+        if self.map_mode {
+            match (key.code, key.modifiers) {
+                (KeyCode::Esc, _) => self.map_mode = false,
+                (KeyCode::Char('c'), KeyModifiers::CONTROL) => self.running = false,
+                (KeyCode::Up, _) => self.map_viewport.pan(0.0, 50.0),
+                (KeyCode::Down, _) => self.map_viewport.pan(0.0, -50.0),
+                (KeyCode::Left, _) => self.map_viewport.pan(-50.0, 0.0),
+                (KeyCode::Right, _) => self.map_viewport.pan(50.0, 0.0),
+                (KeyCode::Char('+'), _) | (KeyCode::Char('='), _) => {
+                    self.map_viewport.zoom_in()
+                }
+                (KeyCode::Char('-'), _) => self.map_viewport.zoom_out(),
+                _ => {}
+            }
+            return;
+        }
+
         match (key.code, key.modifiers) {
             (KeyCode::Esc, _) => self.running = false,
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => self.running = false,
@@ -178,6 +217,10 @@ impl App {
         }
         if command == mapping::SEARCH {
             self.handle_search_command(args);
+            return;
+        }
+        if command == mapping::MAP {
+            self.handle_map_command();
             return;
         }
 
@@ -526,6 +569,27 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn handle_map_command(&mut self) {
+        if self.world_map.is_none() {
+            self.apply_command_result(CommandResult::Error(
+                "No map loaded. Place a world.json in the campaign's map/ directory.".to_string(),
+            ));
+            return;
+        }
+        self.map_mode = !self.map_mode;
+        if self.map_mode {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                "Map mode ON. Arrow keys: pan. +/-: zoom. Esc: exit map.".to_string(),
+                Style::default().fg(Color::Green),
+            )]));
+        } else {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                "Map mode OFF.".to_string(),
+                Style::default().fg(Color::Green),
+            )]));
+        }
     }
 
     fn handle_search_command(&mut self, args: &str) {
@@ -1714,6 +1778,101 @@ mod tests {
     }
 
     // --- search command tests ---
+
+    // --- map mode tests ---
+
+    #[test]
+    fn test_map_command_no_map_returns_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("map");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("No map loaded")),
+            "Map without world.json should show error. Messages: {output_texts:?}"
+        );
+        assert!(!app.map_mode);
+    }
+
+    #[test]
+    fn test_map_command_toggles_mode() {
+        let mut app = App::new();
+        app.running = true;
+        // Set up a minimal world map
+        let json = r##"{"pack": {"burgs": [{"i": 0, "name": ""}, {"i": 1, "name": "Town", "x": 100, "y": 100}]}}"##;
+        app.world_map = Some(
+            crate::map::world::WorldMap::from_parsed(
+                crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+            ),
+        );
+
+        app.dispatch_command("map");
+        assert!(app.map_mode, "map command should enable map mode");
+
+        app.dispatch_command("map");
+        assert!(!app.map_mode, "map command again should disable map mode");
+    }
+
+    #[test]
+    fn test_map_mode_arrow_keys_pan() {
+        let mut app = App::new();
+        app.running = true;
+        app.map_mode = true;
+        let json = r##"{"pack": {}}"##;
+        app.world_map = Some(
+            crate::map::world::WorldMap::from_parsed(
+                crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+            ),
+        );
+
+        let initial_x = app.map_viewport.offset_x;
+        let initial_y = app.map_viewport.offset_y;
+
+        app.on_key(KeyEvent::from(KeyCode::Right));
+        assert!(
+            app.map_viewport.offset_x > initial_x,
+            "Right arrow should pan right"
+        );
+
+        app.on_key(KeyEvent::from(KeyCode::Up));
+        assert!(
+            app.map_viewport.offset_y > initial_y,
+            "Up arrow should pan up"
+        );
+    }
+
+    #[test]
+    fn test_map_mode_escape_exits() {
+        let mut app = App::new();
+        app.running = true;
+        app.map_mode = true;
+
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+        assert!(
+            !app.map_mode,
+            "Esc in map mode should exit map mode, not quit"
+        );
+        assert!(app.running, "App should still be running after Esc in map mode");
+    }
+
+    #[test]
+    fn test_map_mode_zoom() {
+        let mut app = App::new();
+        app.running = true;
+        app.map_mode = true;
+
+        let initial_zoom = app.map_viewport.zoom;
+        app.on_key(KeyEvent::from(KeyCode::Char('+')));
+        assert!(app.map_viewport.zoom > initial_zoom, "Plus should zoom in");
+
+        let zoom_after_in = app.map_viewport.zoom;
+        app.on_key(KeyEvent::from(KeyCode::Char('-')));
+        assert!(
+            app.map_viewport.zoom < zoom_after_in,
+            "Minus should zoom out"
+        );
+    }
 
     #[test]
     fn test_search_no_campaign_returns_error() {
