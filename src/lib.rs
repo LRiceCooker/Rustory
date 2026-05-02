@@ -1,7 +1,9 @@
 pub mod app;
+pub mod audio;
 pub mod commands;
 pub mod game_state;
 pub mod map;
+pub mod persistence;
 pub mod rules;
 pub mod schema;
 pub mod scripting;
