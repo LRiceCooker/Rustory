@@ -1,4 +1,5 @@
 pub mod character;
+pub mod loader;
 pub mod primitives;
 
 use std::path::{Path, PathBuf};

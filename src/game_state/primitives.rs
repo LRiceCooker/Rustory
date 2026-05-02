@@ -633,9 +633,7 @@ mod tests {
     #[test]
     fn test_collection_get_item() {
         let mut c = Collection::new("inventory");
-        c.add_item(
-            CollectionItem::new("Healing Potion").with_property("quantity", "3"),
-        );
+        c.add_item(CollectionItem::new("Healing Potion").with_property("quantity", "3"));
 
         let item = c.get_item("Healing Potion");
         assert!(item.is_some());

@@ -49,8 +49,14 @@ impl Character {
     }
 
     /// Builder: add a pool to the character.
-    pub fn with_pool(mut self, name: &str, max: f64, resets_on: super::primitives::ResetTrigger) -> Self {
-        self.pools.insert(name.to_string(), Pool::new(name, max, resets_on));
+    pub fn with_pool(
+        mut self,
+        name: &str,
+        max: f64,
+        resets_on: super::primitives::ResetTrigger,
+    ) -> Self {
+        self.pools
+            .insert(name.to_string(), Pool::new(name, max, resets_on));
         self
     }
 
@@ -146,7 +152,10 @@ impl Character {
     }
 
     pub fn get_modifiers_for(&self, target: &str) -> Vec<&Modifier> {
-        self.modifiers.iter().filter(|m| m.target == target).collect()
+        self.modifiers
+            .iter()
+            .filter(|m| m.target == target)
+            .collect()
     }
 
     // --- Tag accessors ---
@@ -390,14 +399,22 @@ mod tests {
     #[test]
     fn test_add_modifier() {
         let mut c = Character::new("Hero");
-        c.add_modifier(Modifier::new("bless", "attack_roll", ModifierEffect::Add(1.0)));
+        c.add_modifier(Modifier::new(
+            "bless",
+            "attack_roll",
+            ModifierEffect::Add(1.0),
+        ));
         assert_eq!(c.modifiers.len(), 1);
     }
 
     #[test]
     fn test_remove_modifier() {
         let mut c = Character::new("Hero");
-        c.add_modifier(Modifier::new("bless", "attack_roll", ModifierEffect::Add(1.0)));
+        c.add_modifier(Modifier::new(
+            "bless",
+            "attack_roll",
+            ModifierEffect::Add(1.0),
+        ));
         c.add_modifier(Modifier::new("shield", "ac", ModifierEffect::Add(2.0)));
         assert!(c.remove_modifier("bless"));
         assert_eq!(c.modifiers.len(), 1);
@@ -413,9 +430,17 @@ mod tests {
     #[test]
     fn test_get_modifiers_for_target() {
         let mut c = Character::new("Hero");
-        c.add_modifier(Modifier::new("bless", "attack_roll", ModifierEffect::Add(1.0)));
+        c.add_modifier(Modifier::new(
+            "bless",
+            "attack_roll",
+            ModifierEffect::Add(1.0),
+        ));
         c.add_modifier(Modifier::new("shield", "ac", ModifierEffect::Add(2.0)));
-        c.add_modifier(Modifier::new("guidance", "attack_roll", ModifierEffect::Add(1.0)));
+        c.add_modifier(Modifier::new(
+            "guidance",
+            "attack_roll",
+            ModifierEffect::Add(1.0),
+        ));
         let mods = c.get_modifiers_for("attack_roll");
         assert_eq!(mods.len(), 2);
     }

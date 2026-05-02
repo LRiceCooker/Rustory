@@ -25,11 +25,7 @@ impl TestHarness {
     /// Load a fixture campaign from tests/e2e/fixtures/
     pub fn from_fixture(name: &str) -> Self {
         let path = std::path::PathBuf::from(format!("tests/e2e/fixtures/{name}"));
-        assert!(
-            path.exists(),
-            "Fixture not found: {}",
-            path.display()
-        );
+        assert!(path.exists(), "Fixture not found: {}", path.display());
         let mut app = App::new();
         app.running = true;
         // GameState loading will be wired in Phase 9
@@ -67,9 +63,7 @@ impl TestHarness {
     pub fn render(&self, width: u16, height: u16) -> Buffer {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| ui::render(frame, &self.app))
-            .unwrap();
+        terminal.draw(|frame| ui::render(frame, &self.app)).unwrap();
         terminal.backend().buffer().clone()
     }
 }
