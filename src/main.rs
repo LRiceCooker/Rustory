@@ -1,12 +1,10 @@
-mod commands;
-// mod text;
-// mod map;
-// mod input;
+mod app;
+mod ui;
 
-fn main() { 
-    // text::display::primary(text::wording::lang()["home_screen"]["title"].to_string());
-    // text::display::success("█".to_string());
-    // input::text::get();
-    //map::map_loader::load();
-    commands::user_input::listen();
+fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
+    let terminal = ratatui::init();
+    let result = app::App::new().run(terminal);
+    ratatui::restore();
+    result
 }

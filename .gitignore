@@ -4,3 +4,5 @@ x86_64-apple-darwin/
 .rustc_info.json
 Cargo.lock
 .DS_Store
+.claude
+ralph/
