@@ -1,6 +1,8 @@
+use rand::Rng;
 use ratatui::style::{Color, Style};
 
 use super::mapping;
+use super::parsers::roll;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandResult {
@@ -38,14 +40,55 @@ fn help() -> CommandResult {
     ])
 }
 
+fn roll_dice(args: &str) -> CommandResult {
+    let args = args.trim();
+    if args.is_empty() {
+        return CommandResult::Error("Usage: roll <NdV+M> (e.g. roll 2d6+3)".to_string());
+    }
+
+    match roll::parse(args) {
+        Ok(parsed) => {
+            let mut rng = rand::thread_rng();
+            let mut naturals: Vec<u32> = Vec::new();
+            for _ in 0..parsed.dice {
+                let result = rng.gen_range(1..=parsed.value);
+                naturals.push(result);
+            }
+            let natural_sum: u32 = naturals.iter().sum();
+            let total = natural_sum as i32 + parsed.modifier;
+
+            let mod_str = if parsed.modifier > 0 {
+                format!("+{}", parsed.modifier)
+            } else if parsed.modifier < 0 {
+                format!("{}", parsed.modifier)
+            } else {
+                String::new()
+            };
+
+            CommandResult::Output(vec![
+                StyledLine::plain(format!(
+                    "{} dice(s), maximum value: {}, modifier: {}",
+                    parsed.dice, parsed.value, mod_str
+                )),
+                StyledLine::plain(format!(
+                    "natural: {:?}, result: {}",
+                    naturals, total
+                )),
+            ])
+        }
+        Err(e) => CommandResult::Error(e),
+    }
+}
+
 pub fn dispatch(input: &str) -> CommandResult {
     let parts: Vec<&str> = input.splitn(2, ' ').collect();
     let command = parts[0];
-    let _args = parts.get(1).unwrap_or(&"");
+    let args = parts.get(1).unwrap_or(&"");
 
     match command {
         mapping::QUIT => CommandResult::Quit,
         mapping::HELP => help(),
+        mapping::ROLL => roll_dice(args),
         _ => CommandResult::Unknown(command.to_string()),
     }
 }
@@ -78,6 +121,35 @@ mod tests {
         match dispatch("foobar") {
             CommandResult::Unknown(cmd) => assert_eq!(cmd, "foobar"),
             other => panic!("expected Unknown, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roll_valid() {
+        match dispatch("roll 2d6") {
+            CommandResult::Output(lines) => {
+                assert!(lines[0].text.contains("2 dice(s)"));
+                assert!(lines[0].text.contains("maximum value: 6"));
+                assert!(lines[1].text.contains("natural:"));
+                assert!(lines[1].text.contains("result:"));
+            }
+            other => panic!("expected Output, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roll_no_args() {
+        match dispatch("roll") {
+            CommandResult::Error(msg) => assert!(msg.contains("Usage")),
+            other => panic!("expected Error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roll_invalid() {
+        match dispatch("roll abc") {
+            CommandResult::Error(msg) => assert!(!msg.is_empty()),
+            other => panic!("expected Error, got {:?}", other),
         }
     }
 }
