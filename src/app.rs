@@ -82,9 +82,16 @@ impl App {
             return;
         }
 
-        self.last_command = Some(input.clone());
         self.command_history.push(input.clone());
         self.history_index = None;
+        self.dispatch_command(&input);
+
+        self.input.clear();
+        self.cursor_position = 0;
+    }
+
+    pub fn dispatch_command(&mut self, input: &str) {
+        self.last_command = Some(input.to_string());
         self.scroll_offset = 0;
 
         // Echo the command in DarkGray
@@ -94,7 +101,7 @@ impl App {
         });
 
         // Dispatch and handle the result
-        let result = dispatcher::dispatch(&input);
+        let result = dispatcher::dispatch(input);
         match result {
             CommandResult::Output(lines) => {
                 for line in lines {
@@ -120,9 +127,6 @@ impl App {
                 });
             }
         }
-
-        self.input.clear();
-        self.cursor_position = 0;
     }
 
     fn history_prev(&mut self) {
