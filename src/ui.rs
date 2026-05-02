@@ -18,12 +18,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         ])
         .split(frame.area());
 
+    let locale = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
     let header = Paragraph::new("")
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title("Rustory")
-                .title_style(Color::Cyan),
+                .title_style(Color::Cyan)
+                .title_top(Line::from(locale).right_aligned()),
         );
     frame.render_widget(header, chunks[0]);
 
