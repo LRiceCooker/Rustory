@@ -247,6 +247,18 @@ impl App {
             self.handle_history_command(args);
             return;
         }
+        if command == mapping::SHOW {
+            self.handle_show_command(args);
+            return;
+        }
+        if command == mapping::SET {
+            self.handle_set_command(args);
+            return;
+        }
+        if command == mapping::LIST {
+            self.handle_list_command(args);
+            return;
+        }
         if command == mapping::HELP {
             self.handle_help_command();
             return;
@@ -419,6 +431,9 @@ impl App {
                 "  new   — create a new campaign from a template (e.g. new my_game sample)",
             ),
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
+            StyledLine::plain("  show     — display character sheet (e.g. show thorin)"),
+            StyledLine::plain("  set      — set a character field (e.g. set thorin.hp 35)"),
+            StyledLine::plain("  list     — list players or npcs (e.g. list players)"),
             StyledLine::plain("  history  — show recent state changes (e.g. history 5)"),
             StyledLine::plain("  undo     — revert the last state change"),
             StyledLine::plain("  redo     — re-apply the last undone change"),
@@ -1355,6 +1370,334 @@ impl App {
         }
 
         self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_show_command(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: show <character> [field]".to_string(),
+            ));
+            return;
+        }
+
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let char_name = parts[0];
+        let field = parts.get(1).map(|s| s.trim());
+
+        let name_lower = char_name.to_lowercase();
+        let character = gs
+            .players
+            .iter()
+            .chain(gs.npcs.iter())
+            .find(|c| c.name.to_lowercase() == name_lower);
+
+        let ch = match character {
+            Some(ch) => ch,
+            None => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Character \"{char_name}\" not found."
+                )));
+                return;
+            }
+        };
+
+        if let Some(field_name) = field {
+            // Show a specific field
+            if let Some(val) = ch.get_stat(field_name) {
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::plain(
+                    format!("{}.{field_name} = {val}", ch.name),
+                )]));
+            } else if let Some(gauge) = ch.gauges.get(field_name) {
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::plain(
+                    format!("{}.{field_name} = {}/{}", ch.name, gauge.current, gauge.max),
+                )]));
+            } else {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Field \"{field_name}\" not found on {}.",
+                    ch.name
+                )));
+            }
+            return;
+        }
+
+        // Show full character sheet
+        let mut lines = vec![StyledLine::new(
+            format!("--- {} ---", ch.name),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        // Stats
+        if !ch.stats.is_empty() {
+            lines.push(StyledLine::new(
+                "Stats:".to_string(),
+                Style::default().fg(Color::Yellow),
+            ));
+            for stat in &ch.stats {
+                let v = stat.value;
+                if v.fract() == 0.0 {
+                    lines.push(StyledLine::plain(format!("  {}: {}", stat.name, v as i64)));
+                } else {
+                    lines.push(StyledLine::plain(format!("  {}: {v}", stat.name)));
+                }
+            }
+        }
+
+        // Gauges
+        if !ch.gauges.is_empty() {
+            lines.push(StyledLine::new(
+                "Gauges:".to_string(),
+                Style::default().fg(Color::Yellow),
+            ));
+            for (name, gauge) in &ch.gauges {
+                let pct = if gauge.max > 0.0 {
+                    (gauge.current / gauge.max * 100.0) as u32
+                } else {
+                    0
+                };
+                let color = if pct > 60 {
+                    Color::Green
+                } else if pct > 30 {
+                    Color::Yellow
+                } else {
+                    Color::Red
+                };
+                lines.push(StyledLine::new(
+                    format!("  {name}: {}/{} ({pct}%)", gauge.current, gauge.max),
+                    Style::default().fg(color),
+                ));
+            }
+        }
+
+        // Conditions
+        let active: Vec<_> = ch.conditions.iter().filter(|c| c.active).collect();
+        if !active.is_empty() {
+            lines.push(StyledLine::new(
+                "Conditions:".to_string(),
+                Style::default().fg(Color::Yellow),
+            ));
+            for cond in &active {
+                lines.push(StyledLine::plain(format!("  {}", cond.name)));
+            }
+        }
+
+        // Tags
+        if !ch.tags.is_empty() {
+            lines.push(StyledLine::new(
+                "Tags:".to_string(),
+                Style::default().fg(Color::Yellow),
+            ));
+            for tag in &ch.tags {
+                lines.push(StyledLine::plain(format!("  {}", tag.name)));
+            }
+        }
+
+        // Inventory
+        if !ch.inventory.items.is_empty() {
+            lines.push(StyledLine::new(
+                "Inventory:".to_string(),
+                Style::default().fg(Color::Yellow),
+            ));
+            for item in &ch.inventory.items {
+                let props: Vec<String> = item
+                    .properties
+                    .iter()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect();
+                let prop_str = if props.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", props.join(", "))
+                };
+                lines.push(StyledLine::plain(format!("  {}{prop_str}", item.name)));
+            }
+        }
+
+        // Location
+        if let Some(ref loc) = ch.location {
+            lines.push(StyledLine::plain(format!("Location: {loc}")));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_set_command(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: set <character>.<field> <value> (e.g. set thorin.hp 35)".to_string(),
+            ));
+            return;
+        }
+
+        // Parse "character.field value"
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        if parts.len() < 2 {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: set <character>.<field> <value>".to_string(),
+            ));
+            return;
+        }
+
+        let dot_parts: Vec<&str> = parts[0].splitn(2, '.').collect();
+        if dot_parts.len() < 2 {
+            self.apply_command_result(CommandResult::Error(
+                "Use dot notation: set <character>.<field> <value>".to_string(),
+            ));
+            return;
+        }
+
+        let char_name = dot_parts[0];
+        let field_name = dot_parts[1];
+        let value_str = parts[1].trim();
+
+        let value: f64 = match value_str.parse() {
+            Ok(v) => v,
+            Err(_) => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Invalid value \"{value_str}\". Expected a number."
+                )));
+                return;
+            }
+        };
+
+        let gs = match &mut self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let name_lower = char_name.to_lowercase();
+        let (character, is_player) = {
+            if let Some(ch) = gs.players.iter_mut().find(|c| c.name.to_lowercase() == name_lower) {
+                (ch, true)
+            } else if let Some(ch) = gs.npcs.iter_mut().find(|c| c.name.to_lowercase() == name_lower) {
+                (ch, false)
+            } else {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Character \"{char_name}\" not found."
+                )));
+                return;
+            }
+        };
+
+        // Try stat first, then gauge
+        if character.get_stat(field_name).is_some() {
+            let old = character.get_stat(field_name).unwrap();
+            character.set_stat(field_name, value);
+            let ch_name = character.name.clone();
+
+            // Persist if persistence is available
+            if let (Some(ref pl), Some(ref schema)) =
+                (&self.persistence, &gs.schema)
+            {
+                let _ = pl.persist_character(
+                    character,
+                    is_player,
+                    schema,
+                    &format!("GM set {ch_name}.{field_name} to {value} (was {old})"),
+                );
+            }
+
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                format!("{ch_name}.{field_name}: {old} -> {value}"),
+                Style::default().fg(Color::Green),
+            )]));
+        } else if character.gauges.contains_key(field_name) {
+            let gauge = character.gauges.get_mut(field_name).unwrap();
+            let old = gauge.current;
+            gauge.current = value.max(0.0).min(gauge.max);
+            let ch_name = character.name.clone();
+            let new_val = gauge.current;
+
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                format!("{ch_name}.{field_name}: {old} -> {new_val}"),
+                Style::default().fg(Color::Green),
+            )]));
+        } else {
+            let ch_name = character.name.clone();
+            self.apply_command_result(CommandResult::Error(format!(
+                "Field \"{field_name}\" not found on {ch_name}."
+            )));
+        }
+    }
+
+    fn handle_list_command(&mut self, args: &str) {
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let list_type = if args.is_empty() { "players" } else { args.trim() };
+
+        match list_type {
+            "players" => {
+                if gs.players.is_empty() {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        "No players loaded.".to_string(),
+                        Style::default().fg(Color::Yellow),
+                    )]));
+                    return;
+                }
+                let mut lines = vec![StyledLine::new(
+                    "Players:".to_string(),
+                    Style::default().fg(Color::Cyan),
+                )];
+                for ch in &gs.players {
+                    let hp_str = ch
+                        .gauges
+                        .get("hp")
+                        .map(|g| format!(" HP: {}/{}", g.current, g.max))
+                        .unwrap_or_default();
+                    lines.push(StyledLine::plain(format!("  {}{hp_str}", ch.name)));
+                }
+                self.apply_command_result(CommandResult::Output(lines));
+            }
+            "npcs" => {
+                if gs.npcs.is_empty() {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        "No NPCs loaded.".to_string(),
+                        Style::default().fg(Color::Yellow),
+                    )]));
+                    return;
+                }
+                let mut lines = vec![StyledLine::new(
+                    "NPCs:".to_string(),
+                    Style::default().fg(Color::Cyan),
+                )];
+                for ch in &gs.npcs {
+                    let hp_str = ch
+                        .gauges
+                        .get("hp")
+                        .map(|g| format!(" HP: {}/{}", g.current, g.max))
+                        .unwrap_or_default();
+                    lines.push(StyledLine::plain(format!("  {}{hp_str}", ch.name)));
+                }
+                self.apply_command_result(CommandResult::Output(lines));
+            }
+            other => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Unknown list type \"{other}\". Try: players, npcs"
+                )));
+            }
+        }
     }
 
     fn handle_history_command(&mut self, args: &str) {
@@ -3686,6 +4029,199 @@ mod tests {
         // Any non-undo/redo command should clear redo stack
         app.dispatch_command("help");
         assert!(app.redo_stack.is_empty(), "Redo stack should be cleared after a regular command");
+    }
+
+    // --- Show/Set/List command tests ---
+
+    #[test]
+    fn test_show_character() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("show_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"ShowTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\"]\n\n[resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign.join("players/thorin/sheet.csv"),
+            "name,strength,hp_max\nThorin,18,52\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("show thorin");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Thorin"), "Should show character name. Got: {output}");
+        assert!(output.contains("18"), "Should show strength. Got: {output}");
+    }
+
+    #[test]
+    fn test_show_specific_field() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("show_field");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/hero")).unwrap();
+        std::fs::write(
+            campaign.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("show hero strength");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("15"), "Should show strength value. Got: {output}");
+    }
+
+    #[test]
+    fn test_show_unknown_character() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("show_unknown");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("show nobody");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("not found"), "Should report not found. Got: {output}");
+    }
+
+    #[test]
+    fn test_set_stat() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("set_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/hero")).unwrap();
+        std::fs::write(
+            campaign.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("set hero.strength 20");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("20"), "Should show new value. Got: {output}");
+
+        // Verify the stat was actually changed
+        assert_eq!(
+            app.game_state.as_ref().unwrap().get_player("Hero").unwrap().get_stat("strength"),
+            Some(20.0)
+        );
+    }
+
+    #[test]
+    fn test_set_unknown_field() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("set_unknown");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/hero")).unwrap();
+        std::fs::write(
+            campaign.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("set hero.charisma 10");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("not found"), "Should report field not found. Got: {output}");
+    }
+
+    #[test]
+    fn test_list_players() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("list_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/hero")).unwrap();
+        std::fs::write(
+            campaign.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("list players");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Hero"), "Should list Hero. Got: {output}");
+    }
+
+    #[test]
+    fn test_list_npcs_empty() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("list_empty");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("list npcs");
+
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No NPCs"), "Should report no NPCs. Got: {output}");
     }
 
     // --- History command tests ---

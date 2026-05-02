@@ -6,11 +6,15 @@ pub const QUIT: &str = "quit";
 pub const ROLL: &str = "roll";
 pub const SEARCH: &str = "search";
 pub const HISTORY: &str = "history";
+pub const LIST: &str = "list";
 pub const REDO: &str = "redo";
+pub const SET: &str = "set";
+pub const SHOW: &str = "show";
 pub const SOUND: &str = "sound";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
 
-pub const COMMANDS: [&str; 12] = [
-    HELP, HISTORY, LOAD, MAP, NEW, QUIT, REDO, ROLL, SEARCH, SOUND, UNDO, VALIDATE,
+pub const COMMANDS: [&str; 15] = [
+    HELP, HISTORY, LIST, LOAD, MAP, NEW, QUIT, REDO, ROLL, SEARCH, SET, SHOW, SOUND, UNDO,
+    VALIDATE,
 ];
