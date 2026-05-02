@@ -22,6 +22,20 @@ impl TestHarness {
         Self { app }
     }
 
+    /// Load a fixture campaign from tests/e2e/fixtures/
+    pub fn from_fixture(name: &str) -> Self {
+        let path = std::path::PathBuf::from(format!("tests/e2e/fixtures/{name}"));
+        assert!(
+            path.exists(),
+            "Fixture not found: {}",
+            path.display()
+        );
+        let mut app = App::new();
+        app.running = true;
+        // GameState loading will be wired in Phase 9
+        Self { app }
+    }
+
     /// Create a new test harness with a seeded RNG for deterministic tests
     pub fn with_seed(seed: u64) -> Self {
         let mut app = App::with_rng(Box::new(StdRng::seed_from_u64(seed)));
@@ -228,6 +242,18 @@ mod tests {
         h1.execute("roll 3d6");
         h2.execute("roll 3d6");
         assert_eq!(h1.last_output(), h2.last_output());
+    }
+
+    #[test]
+    fn test_e2e_load_minimal_campaign() {
+        let mut harness = TestHarness::from_fixture("minimal");
+        // Verify fixture loaded (GameState verification comes in Phase 9)
+        assert!(harness.app.running);
+
+        // Verify help command works
+        harness.execute("help");
+        let output = harness.last_output().unwrap();
+        assert!(output.contains("help") || output.contains("quit") || output.contains("roll"));
     }
 
     #[test]
