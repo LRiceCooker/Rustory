@@ -282,4 +282,112 @@ mod tests {
 
         assert!(campaign.path().join("players/thorin/lore.md").exists());
     }
+
+    #[test]
+    fn test_e2e_load_campaign_with_player_and_npc() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test Campaign\"\n")
+            .with_player(
+                "thorin",
+                "name,strength,dexterity,constitution,hp_max,ac\nThorin,18,12,16,52,18\n",
+            )
+            .with_npc(
+                "goblin",
+                "name,strength,dexterity,constitution,hp_max,ac\nGoblin,8,14,10,7,15\n",
+            );
+
+        let harness = TestHarness::from_campaign(&campaign);
+
+        // Verify game_state loaded
+        let gs = harness.game_state().expect("game state should be loaded");
+        assert_eq!(gs.campaign_name, campaign.path().file_name().unwrap().to_str().unwrap());
+
+        // Verify player loaded with correct stats
+        assert_eq!(gs.players.len(), 1);
+        let player = &gs.players[0];
+        assert_eq!(player.name, "Thorin");
+        assert_eq!(player.get_stat("strength"), Some(18.0));
+        assert_eq!(player.get_stat("dexterity"), Some(12.0));
+        assert_eq!(player.get_stat("constitution"), Some(16.0));
+        assert_eq!(player.get_stat("hp_max"), Some(52.0));
+        assert_eq!(player.get_stat("ac"), Some(18.0));
+
+        // Verify NPC loaded with correct stats
+        assert_eq!(gs.npcs.len(), 1);
+        let npc = &gs.npcs[0];
+        assert_eq!(npc.name, "Goblin");
+        assert_eq!(npc.get_stat("strength"), Some(8.0));
+        assert_eq!(npc.get_stat("dexterity"), Some(14.0));
+        assert_eq!(npc.get_stat("constitution"), Some(10.0));
+        assert_eq!(npc.get_stat("hp_max"), Some(7.0));
+        assert_eq!(npc.get_stat("ac"), Some(15.0));
+    }
+
+    #[test]
+    fn test_e2e_load_campaign_player_and_npc_accessible_by_name() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Lookup Test\"\n")
+            .with_player("thorin", "name,strength\nThorin,18\n")
+            .with_npc("goblin", "name,strength\nGoblin,8\n");
+
+        let harness = TestHarness::from_campaign(&campaign);
+        let gs = harness.game_state().unwrap();
+
+        // Verify lookup by name
+        let player = gs.get_player("Thorin").expect("should find player by name");
+        assert_eq!(player.get_stat("strength"), Some(18.0));
+
+        let npc = gs.get_npc("Goblin").expect("should find NPC by name");
+        assert_eq!(npc.get_stat("strength"), Some(8.0));
+
+        // Unknown names return None
+        assert!(gs.get_player("Nobody").is_none());
+        assert!(gs.get_npc("Nobody").is_none());
+    }
+
+    #[test]
+    fn test_e2e_load_campaign_with_inventory_and_lore() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Full Test\"\n")
+            .with_player("thorin", "name,strength\nThorin,18\n")
+            .with_lore("thorin", "A brave dwarf warrior.")
+            .with_npc("goblin", "name,strength\nGoblin,8\n");
+
+        let harness = TestHarness::from_campaign(&campaign);
+        let gs = harness.game_state().unwrap();
+
+        let player = gs.get_player("Thorin").unwrap();
+        assert_eq!(player.lore.as_deref(), Some("A brave dwarf warrior."));
+
+        // NPC without lore should have None
+        let npc = gs.get_npc("Goblin").unwrap();
+        assert!(npc.lore.is_none());
+    }
+
+    #[test]
+    fn test_e2e_load_campaign_with_non_numeric_stats() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Mixed Types\"\n")
+            .with_player(
+                "thorin",
+                "name,class,level,strength\nThorin,Fighter,5,18\n",
+            )
+            .with_npc("goblin", "name,class,level,strength\nGoblin,Monster,1,8\n");
+
+        let harness = TestHarness::from_campaign(&campaign);
+        let gs = harness.game_state().unwrap();
+
+        let player = &gs.players[0];
+        assert_eq!(player.name, "Thorin");
+        // Non-numeric "class" stored as 0.0 (Phase 10 will handle typed columns)
+        assert_eq!(player.get_stat("class"), Some(0.0));
+        assert_eq!(player.get_stat("level"), Some(5.0));
+        assert_eq!(player.get_stat("strength"), Some(18.0));
+
+        let npc = &gs.npcs[0];
+        assert_eq!(npc.name, "Goblin");
+        assert_eq!(npc.get_stat("class"), Some(0.0));
+        assert_eq!(npc.get_stat("level"), Some(1.0));
+        assert_eq!(npc.get_stat("strength"), Some(8.0));
+    }
 }
