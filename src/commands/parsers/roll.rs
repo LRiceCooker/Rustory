@@ -119,4 +119,18 @@ mod tests {
             Roll { dice: 1, value: 100, modifier: 0 }
         );
     }
+
+    #[test]
+    fn test_parse_missing_count() {
+        // "d6" has empty string before 'd'
+        assert!(parse("d6").is_err());
+    }
+
+    #[test]
+    fn test_parse_negative_modifier() {
+        assert_eq!(
+            parse("1d20-5").unwrap(),
+            Roll { dice: 1, value: 20, modifier: -5 }
+        );
+    }
 }
