@@ -1101,6 +1101,47 @@ KTHXBYE",
         );
     }
 
+    // --- Phase 14 E2E: search engine ---
+
+    #[test]
+    fn test_e2e_search_finds_lore_content() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\"]\n",
+            )
+            .with_npc(
+                "goblin_king",
+                "name\nGoblin King\n",
+            )
+            .with_lore(
+                "goblin_king",
+                "# The Goblin King\nThe Goblin King rules from his dark throne.\nHe commands an army of goblins deep beneath the mountain.",
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("search goblin king");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Goblin King") || all_output.contains("goblin"),
+            "Search should find content from lore.md. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("dark throne") || all_output.contains("throne"),
+            "Search should show matching passage. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("lore.md"),
+            "Search should include source file reference. Output: {all_output}"
+        );
+    }
+
     #[test]
     fn test_e2e_builtin_help_wins_over_custom_help() {
         // Create a campaign with a custom command named "help"
