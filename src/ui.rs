@@ -1,5 +1,5 @@
 use ratatui::layout::{Constraint, Direction, Layout, Position};
-use ratatui::style::Color;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
@@ -49,8 +49,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         .scroll((scroll, 0));
     frame.render_widget(main_area, chunks[1]);
 
-    let input_text = format!("{}{}", PROMPT, app.input);
-    let input_bar = Paragraph::new(input_text)
+    let mut input_spans = vec![
+        Span::raw(PROMPT.to_string()),
+        Span::raw(app.input.clone()),
+    ];
+    if let Some(hint) = app.autocomplete_hint() {
+        input_spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+    }
+    let input_bar = Paragraph::new(Line::from(input_spans))
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(input_bar, chunks[2]);
 

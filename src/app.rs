@@ -155,6 +155,17 @@ impl App {
         }
     }
 
+    pub fn autocomplete_hint(&self) -> Option<String> {
+        if self.input.is_empty() {
+            return None;
+        }
+        let input_lower = self.input.to_lowercase();
+        crate::commands::mapping::COMMANDS
+            .iter()
+            .find(|cmd| cmd.starts_with(&input_lower) && **cmd != input_lower)
+            .map(|cmd| cmd[self.input.len()..].to_string())
+    }
+
     fn insert_char(&mut self, c: char) {
         self.input.insert(self.cursor_position, c);
         self.cursor_position += c.len_utf8();
