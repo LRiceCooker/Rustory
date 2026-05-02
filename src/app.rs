@@ -220,7 +220,7 @@ impl App {
             return;
         }
         if command == mapping::MAP {
-            self.handle_map_command();
+            self.handle_map_command(args);
             return;
         }
 
@@ -571,24 +571,282 @@ impl App {
         Ok(())
     }
 
-    fn handle_map_command(&mut self) {
+    fn handle_map_command(&mut self, args: &str) {
         if self.world_map.is_none() {
             self.apply_command_result(CommandResult::Error(
                 "No map loaded. Place a world.json in the campaign's map/ directory.".to_string(),
             ));
             return;
         }
-        self.map_mode = !self.map_mode;
-        if self.map_mode {
-            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                "Map mode ON. Arrow keys: pan. +/-: zoom. Esc: exit map.".to_string(),
-                Style::default().fg(Color::Green),
-            )]));
+
+        if args.is_empty() {
+            self.map_mode = !self.map_mode;
+            if self.map_mode {
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Map mode ON. Arrow keys: pan. +/-: zoom. Esc: exit map.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            } else {
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Map mode OFF.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            return;
+        }
+
+        let sub_parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let subcmd = sub_parts[0];
+        let sub_args = sub_parts.get(1).unwrap_or(&"").trim();
+
+        match subcmd {
+            "list" => self.map_list(sub_args),
+            "info" => self.map_info(sub_args),
+            "search" => self.map_search(sub_args),
+            "near" => self.map_near(sub_args),
+            "route" => self.map_route(sub_args),
+            _ => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Unknown map subcommand \"{subcmd}\". Try: list, info, search, near, route"
+                )));
+            }
+        }
+    }
+
+    fn map_list(&mut self, args: &str) {
+        let world = self.world_map.as_ref().unwrap();
+        let entity_type = if args.is_empty() { "burgs" } else { args };
+        let mut lines = Vec::new();
+
+        match entity_type {
+            "burgs" => {
+                lines.push(StyledLine::new(
+                    "Burgs:".to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
+                for burg in world.map.pack.burgs.iter().skip(1) {
+                    if burg.name.is_empty() {
+                        continue;
+                    }
+                    let pop = burg.population * 1000.0;
+                    let kind = if burg.capital > 0 {
+                        " (capital)"
+                    } else {
+                        ""
+                    };
+                    lines.push(StyledLine::plain(format!(
+                        "  {} — pop: {:.0}{kind}",
+                        burg.name, pop
+                    )));
+                }
+            }
+            "states" => {
+                lines.push(StyledLine::new(
+                    "States:".to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
+                for state in world.map.pack.states.iter().skip(1) {
+                    if state.name.is_empty() {
+                        continue;
+                    }
+                    lines.push(StyledLine::plain(format!(
+                        "  {} — {}",
+                        state.name, state.form
+                    )));
+                }
+            }
+            "cultures" => {
+                lines.push(StyledLine::new(
+                    "Cultures:".to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
+                for culture in world.map.pack.cultures.iter().skip(1) {
+                    if culture.name.is_empty() {
+                        continue;
+                    }
+                    lines.push(StyledLine::plain(format!(
+                        "  {} — {}",
+                        culture.name, culture.culture_type
+                    )));
+                }
+            }
+            other => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Unknown entity type \"{other}\". Try: burgs, states, cultures"
+                )));
+                return;
+            }
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn map_info(&mut self, args: &str) {
+        let world = self.world_map.as_ref().unwrap();
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: map info <name>".to_string(),
+            ));
+            return;
+        }
+
+        // Try burg first, then state
+        if let Some(burg) = world.get_burg(args) {
+            let state_name = world
+                .map
+                .pack
+                .states
+                .get(burg.state as usize)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+            let culture_name = world
+                .map
+                .pack
+                .cultures
+                .get(burg.culture as usize)
+                .map(|c| c.name.as_str())
+                .unwrap_or("Unknown");
+
+            let lines = vec![
+                StyledLine::new(
+                    format!("{} ({})", burg.name, burg.burg_type),
+                    Style::default().fg(Color::Cyan),
+                ),
+                StyledLine::plain(format!("  Population: {:.0}", burg.population * 1000.0)),
+                StyledLine::plain(format!("  State: {state_name}")),
+                StyledLine::plain(format!("  Culture: {culture_name}")),
+                StyledLine::plain(format!(
+                    "  Features: {}{}{}",
+                    if burg.capital > 0 { "capital " } else { "" },
+                    if burg.port > 0 { "port " } else { "" },
+                    if burg.citadel > 0 { "citadel " } else { "" },
+                )),
+            ];
+            self.apply_command_result(CommandResult::Output(lines));
+        } else if let Some(state) = world.get_state(args) {
+            let burgs = world.burgs_in_state(args);
+            let lines = vec![
+                StyledLine::new(
+                    format!("{} ({})", state.name, state.form),
+                    Style::default().fg(Color::Cyan),
+                ),
+                StyledLine::plain(format!("  Area: {:.0}", state.area)),
+                StyledLine::plain(format!("  Burgs: {}", burgs.len())),
+            ];
+            self.apply_command_result(CommandResult::Output(lines));
         } else {
+            self.apply_command_result(CommandResult::Error(format!(
+                "No burg or state named \"{args}\" found."
+            )));
+        }
+    }
+
+    fn map_search(&mut self, args: &str) {
+        let world = self.world_map.as_ref().unwrap();
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: map search <query>".to_string(),
+            ));
+            return;
+        }
+
+        let results = world.search_burgs(args);
+        if results.is_empty() {
             self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                "Map mode OFF.".to_string(),
-                Style::default().fg(Color::Green),
+                format!("No locations matching \"{args}\"."),
+                Style::default().fg(Color::Yellow),
             )]));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::new(
+            format!("Locations matching \"{}\":", args),
+            Style::default().fg(Color::Cyan),
+        )];
+        for burg in &results {
+            lines.push(StyledLine::plain(format!(
+                "  {} — pop: {:.0}",
+                burg.name,
+                burg.population * 1000.0
+            )));
+        }
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn map_near(&mut self, args: &str) {
+        let world = self.world_map.as_ref().unwrap();
+        let parts: Vec<&str> = args.rsplitn(2, ' ').collect();
+        let (name, radius) = if parts.len() == 2 {
+            if let Ok(r) = parts[0].parse::<f64>() {
+                (parts[1], r)
+            } else {
+                (args, 200.0)
+            }
+        } else {
+            (args, 200.0)
+        };
+
+        if name.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: map near <name> [radius]".to_string(),
+            ));
+            return;
+        }
+
+        let results = world.nearby_burgs(name, radius);
+        if results.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                format!("No burgs within {radius:.0} of \"{name}\"."),
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::new(
+            format!("Burgs near \"{}\" (within {:.0}):", name, radius),
+            Style::default().fg(Color::Cyan),
+        )];
+        for (burg, dist) in &results {
+            lines.push(StyledLine::plain(format!(
+                "  {} — distance: {:.1}",
+                burg.name, dist
+            )));
+        }
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn map_route(&mut self, args: &str) {
+        let world = self.world_map.as_ref().unwrap();
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: map route <from> <to>".to_string(),
+            ));
+            return;
+        }
+
+        let from = parts[0];
+        let to = parts[1];
+
+        match world.get_route(from, to) {
+            Some(route) => {
+                let lines = vec![
+                    StyledLine::new(
+                        format!("Route from {} to {}:", from, to),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    StyledLine::plain(format!("  Type: {}", route.group)),
+                    StyledLine::plain(format!("  Length: {:.1}", route.length)),
+                    StyledLine::plain(format!("  Waypoints: {}", route.points.len())),
+                ];
+                self.apply_command_result(CommandResult::Output(lines));
+            }
+            None => {
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    format!("No direct route between \"{from}\" and \"{to}\"."),
+                    Style::default().fg(Color::Yellow),
+                )]));
+            }
         }
     }
 
@@ -1795,23 +2053,128 @@ mod tests {
         assert!(!app.map_mode);
     }
 
+    fn make_test_world_map() -> crate::map::world::WorldMap {
+        let json = r##"{
+            "info": {"width": 800, "height": 600},
+            "pack": {
+                "burgs": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Silverport", "x": 100.0, "y": 100.0, "population": 28.5, "state": 1, "culture": 1, "type": "City", "capital": 1, "port": 1},
+                    {"i": 2, "name": "Ironhold", "x": 200.0, "y": 100.0, "population": 12.0, "state": 1, "culture": 1, "type": "Town"},
+                    {"i": 3, "name": "Silver Lake", "x": 120.0, "y": 110.0, "population": 3.0, "state": 1}
+                ],
+                "states": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Kingdom of Light", "form": "Monarchy"}
+                ],
+                "cultures": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Elven", "type": "Lake"}
+                ],
+                "routes": [
+                    {"i": 1, "points": [{"x": 100.0, "y": 100.0}, {"x": 200.0, "y": 100.0}], "group": "roads", "length": 100.0}
+                ]
+            }
+        }"##;
+        crate::map::world::WorldMap::from_parsed(
+            crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+        )
+    }
+
     #[test]
     fn test_map_command_toggles_mode() {
         let mut app = App::new();
         app.running = true;
-        // Set up a minimal world map
-        let json = r##"{"pack": {"burgs": [{"i": 0, "name": ""}, {"i": 1, "name": "Town", "x": 100, "y": 100}]}}"##;
-        app.world_map = Some(
-            crate::map::world::WorldMap::from_parsed(
-                crate::map::azgaar::parse_azgaar_json(json).unwrap(),
-            ),
-        );
+        app.world_map = Some(make_test_world_map());
 
         app.dispatch_command("map");
         assert!(app.map_mode, "map command should enable map mode");
 
         app.dispatch_command("map");
         assert!(!app.map_mode, "map command again should disable map mode");
+    }
+
+    #[test]
+    fn test_map_list_burgs() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+        app.dispatch_command("map list burgs");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("Silverport")));
+        assert!(output_texts.iter().any(|t| t.contains("Ironhold")));
+    }
+
+    #[test]
+    fn test_map_list_states() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+        app.dispatch_command("map list states");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("Kingdom of Light")));
+    }
+
+    #[test]
+    fn test_map_info_burg() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+        app.dispatch_command("map info Silverport");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("Silverport")));
+        assert!(output_texts.iter().any(|t| t.contains("Population")));
+        assert!(output_texts.iter().any(|t| t.contains("Kingdom of Light")));
+    }
+
+    #[test]
+    fn test_map_info_not_found() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+        app.dispatch_command("map info Nowhere");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("No burg or state")));
+    }
+
+    #[test]
+    fn test_map_search() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+        app.dispatch_command("map search silver");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("Silverport")));
+        assert!(output_texts.iter().any(|t| t.contains("Silver Lake")));
+    }
+
+    #[test]
+    fn test_map_near() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+        app.dispatch_command("map near Silverport 150");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("Silver Lake")));
+        assert!(output_texts.iter().any(|t| t.contains("Ironhold")));
+    }
+
+    #[test]
+    fn test_map_route() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+        app.dispatch_command("map route Silverport Ironhold");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(output_texts.iter().any(|t| t.contains("Route")));
+        assert!(output_texts.iter().any(|t| t.contains("roads")));
     }
 
     #[test]
