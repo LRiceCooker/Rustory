@@ -780,4 +780,89 @@ mod tests {
         assert!(saw_partial, "Partial tier should be reachable");
         assert!(saw_miss, "Miss tier should be reachable");
     }
+
+    // --- Phase 11 E2E: load command integration ---
+
+    #[test]
+    fn test_e2e_load_dnd_basic_via_command() {
+        let mut harness = TestHarness::new();
+
+        // Load campaign via the load command
+        harness.execute("load tests/e2e/fixtures/dnd_basic");
+
+        // Verify game state is loaded
+        let gs = harness.game_state().expect("campaign should be loaded");
+        assert_eq!(gs.campaign_name, "dnd_basic");
+        assert!(gs.rules.is_some());
+        assert_eq!(gs.players.len(), 1);
+        assert_eq!(gs.npcs.len(), 1);
+
+        // Verify output shows success
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_output.contains("loaded successfully"),
+            "Should show success. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_load_dnd_basic_header_shows_campaign_name() {
+        let mut harness = TestHarness::new();
+        harness.execute("load tests/e2e/fixtures/dnd_basic");
+
+        // Render and check header contains campaign name
+        let buf = harness.render(80, 24);
+        assert!(
+            buffer_contains(&buf, "dnd_basic"),
+            "Header should show campaign name 'dnd_basic'"
+        );
+    }
+
+    #[test]
+    fn test_e2e_load_dnd_basic_help_shows_campaign_status() {
+        let mut harness = TestHarness::new();
+        harness.execute("load tests/e2e/fixtures/dnd_basic");
+        harness.execute("help");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Help should show campaign is loaded
+        assert!(
+            all_output.contains("dnd_basic") && all_output.contains("loaded"),
+            "Help should show campaign status. Output: {all_output}"
+        );
+        // Help should show system name
+        assert!(
+            all_output.contains("D&D 5e"),
+            "Help should show system name. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_roll_works_after_loading_campaign() {
+        let mut harness = TestHarness::with_seed(42);
+        harness.execute("load tests/e2e/fixtures/dnd_basic");
+        harness.execute("roll 1d20");
+
+        // Verify roll output appears (after the load messages)
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_output.contains("natural:") && all_output.contains("result:"),
+            "Roll should work after loading. Output: {all_output}"
+        );
+    }
 }
