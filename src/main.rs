@@ -1,5 +1,6 @@
 mod app;
 mod commands;
+mod text;
 mod ui;
 
 fn main() -> color_eyre::Result<()> {
