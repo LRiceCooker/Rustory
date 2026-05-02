@@ -191,6 +191,13 @@ impl TestCampaign {
         self
     }
 
+    pub fn with_map(self, json: &str) -> Self {
+        let map_dir = self.dir.path().join("map");
+        fs::create_dir_all(&map_dir).unwrap();
+        fs::write(map_dir.join("world.json"), json).unwrap();
+        self
+    }
+
     pub fn path(&self) -> &Path {
         self.dir.path()
     }
@@ -1139,6 +1146,138 @@ KTHXBYE",
         assert!(
             all_output.contains("lore.md"),
             "Search should include source file reference. Output: {all_output}"
+        );
+    }
+
+    // --- Phase 15 E2E: map system ---
+
+    fn map_test_json() -> &'static str {
+        r##"{"info":{"mapName":"Test World","width":800,"height":600},"pack":{"burgs":[{"i":0,"name":""},{"i":1,"name":"Silverport","x":100,"y":100,"population":28.5,"state":1,"culture":1,"type":"City","capital":1,"port":1},{"i":2,"name":"Ironhold","x":500,"y":300,"population":12.0,"state":1,"culture":1,"type":"Town"},{"i":3,"name":"Silver Lake","x":120,"y":110,"population":3.0,"state":1}],"states":[{"i":0,"name":""},{"i":1,"name":"Kingdom of Light","form":"Monarchy"}],"cultures":[{"i":0,"name":""},{"i":1,"name":"Elven","type":"Lake"}],"routes":[{"i":1,"points":[{"x":100,"y":100},{"x":500,"y":300}],"group":"roads","length":100}]}}"##
+    }
+
+    #[test]
+    fn test_e2e_map_list_burgs() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n")
+            .with_map(map_test_json());
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("map list burgs");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Silverport"),
+            "map list burgs should show Silverport. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Ironhold"),
+            "map list burgs should show Ironhold. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_map_info_shows_details() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n")
+            .with_map(map_test_json());
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("map info Silverport");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(all_output.contains("Silverport"), "Should show burg name");
+        assert!(
+            all_output.contains("Population") || all_output.contains("28500"),
+            "Should show population. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Kingdom of Light"),
+            "Should show state. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_map_search_partial() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n")
+            .with_map(map_test_json());
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("map search silver");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Silverport"),
+            "Search should find Silverport. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Silver Lake"),
+            "Search should find Silver Lake. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_map_near_sorted() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n")
+            .with_map(map_test_json());
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("map near Silverport 500");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Silver Lake"),
+            "Should find Silver Lake nearby. Output: {all_output}"
+        );
+        // Silver Lake should appear before Ironhold (closer)
+        let silver_pos = all_output.find("Silver Lake").unwrap_or(usize::MAX);
+        let iron_pos = all_output.find("Ironhold").unwrap_or(usize::MAX);
+        assert!(
+            silver_pos < iron_pos,
+            "Silver Lake should appear before Ironhold (closer). Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_map_mode_renders() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n")
+            .with_map(map_test_json());
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("map");
+
+        assert!(harness.app.map_mode, "Should be in map mode");
+
+        let buf = harness.render(80, 25);
+        assert!(
+            buffer_contains(&buf, "Map"),
+            "Map mode should render Canvas with Map title"
         );
     }
 
