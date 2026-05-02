@@ -1,8 +1,12 @@
+use std::fs;
+use std::path::Path;
+
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 use rustory::app::{App, Message};
 use rustory::ui;
+use tempfile::TempDir;
 
 pub struct TestHarness {
     pub app: App,
@@ -68,6 +72,73 @@ pub fn buffer_line_contains(buf: &Buffer, line: u16, text: &str) -> bool {
     content.contains(text)
 }
 
+pub struct TestCampaign {
+    dir: TempDir,
+}
+
+impl TestCampaign {
+    pub fn new() -> Self {
+        let dir = TempDir::new().unwrap();
+        // Create required directories
+        fs::create_dir_all(dir.path().join("rules")).unwrap();
+        Self { dir }
+    }
+
+    pub fn with_system_toml(self, content: &str) -> Self {
+        fs::write(self.dir.path().join("rules/system.toml"), content).unwrap();
+        self
+    }
+
+    pub fn with_player(self, name: &str, csv: &str) -> Self {
+        let player_dir = self.dir.path().join("players").join(name);
+        fs::create_dir_all(&player_dir).unwrap();
+        fs::write(player_dir.join("sheet.csv"), csv).unwrap();
+        self
+    }
+
+    pub fn with_npc(self, name: &str, csv: &str) -> Self {
+        let npc_dir = self.dir.path().join("npc").join(name);
+        fs::create_dir_all(&npc_dir).unwrap();
+        fs::write(npc_dir.join("sheet.csv"), csv).unwrap();
+        self
+    }
+
+    pub fn with_bulk_npcs(self, filename: &str, csv: &str) -> Self {
+        let npc_dir = self.dir.path().join("npc");
+        fs::create_dir_all(&npc_dir).unwrap();
+        fs::write(npc_dir.join(filename), csv).unwrap();
+        self
+    }
+
+    pub fn with_lol_command(self, name: &str, script: &str) -> Self {
+        let cmd_dir = self.dir.path().join("rules/commands");
+        fs::create_dir_all(&cmd_dir).unwrap();
+        fs::write(cmd_dir.join(format!("{name}.lol")), script).unwrap();
+        self
+    }
+
+    pub fn with_lore(self, character: &str, markdown: &str) -> Self {
+        // Determine if it's a player or NPC by checking existing dirs
+        let player_dir = self.dir.path().join("players").join(character);
+        let npc_dir = self.dir.path().join("npc").join(character);
+        let target = if player_dir.exists() {
+            player_dir
+        } else if npc_dir.exists() {
+            npc_dir
+        } else {
+            // Default to npc
+            fs::create_dir_all(&npc_dir).unwrap();
+            npc_dir
+        };
+        fs::write(target.join("lore.md"), markdown).unwrap();
+        self
+    }
+
+    pub fn path(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +194,30 @@ mod tests {
         // Input bar is on the last few lines
         let last_line = 20 - 2; // inside the input bar
         assert!(buffer_line_contains(&buf, last_line, "rustory >"));
+    }
+
+    #[test]
+    fn test_campaign_builder_creates_structure() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"Test\"\n")
+            .with_player("thorin", "name,level\nThorin,5\n")
+            .with_npc("goblin", "name,level\nGoblin,1\n")
+            .with_bulk_npcs("townspeople.csv", "name,level\nBob,1\nAlice,2\n")
+            .with_lol_command("smite", "HAI 1.2\nKTHXBYE\n");
+
+        assert!(campaign.path().join("rules/system.toml").exists());
+        assert!(campaign.path().join("players/thorin/sheet.csv").exists());
+        assert!(campaign.path().join("npc/goblin/sheet.csv").exists());
+        assert!(campaign.path().join("npc/townspeople.csv").exists());
+        assert!(campaign.path().join("rules/commands/smite.lol").exists());
+    }
+
+    #[test]
+    fn test_campaign_builder_with_lore() {
+        let campaign = TestCampaign::new()
+            .with_player("thorin", "name\nThorin\n")
+            .with_lore("thorin", "# Thorin\nA brave dwarf.");
+
+        assert!(campaign.path().join("players/thorin/lore.md").exists());
     }
 }
