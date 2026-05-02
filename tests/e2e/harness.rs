@@ -623,4 +623,151 @@ mod tests {
         let result_verify = resolve_check(ability_check, thorin, &args, &mut rng_verify);
         assert_eq!(result, result_verify);
     }
+
+    // --- pbta_basic fixture tests ---
+
+    #[test]
+    fn test_e2e_pbta_basic_loads_correctly() {
+        let harness = TestHarness::from_fixture("pbta_basic");
+        let gs = harness.game_state().expect("game state should be loaded");
+
+        // Verify system
+        let rules = gs.rules.as_ref().expect("rules should be loaded");
+        assert_eq!(rules.system_name, "PbtA");
+        assert_eq!(rules.stat_names.len(), 5);
+        assert_eq!(rules.stat_names[0], "cool");
+
+        // Verify player
+        assert_eq!(gs.players.len(), 1);
+        let ghost = gs.get_player("Ghost").expect("Ghost should be loaded");
+        assert_eq!(ghost.get_stat("cool"), Some(1.0));
+        assert_eq!(ghost.get_stat("hard"), Some(2.0));
+        assert_eq!(ghost.get_stat("hot"), Some(-1.0));
+        assert_eq!(ghost.get_stat("sharp"), Some(0.0));
+        assert_eq!(ghost.get_stat("weird"), Some(1.0));
+
+        // Verify NPC
+        assert_eq!(gs.npcs.len(), 1);
+        let brute = gs.get_npc("Brute").expect("Brute should be loaded");
+        assert_eq!(brute.get_stat("hard"), Some(3.0));
+
+        // Verify tiered check exists
+        assert_eq!(rules.checks.len(), 1);
+        let check = &rules.checks[0];
+        assert_eq!(check.name, "move");
+        assert_eq!(check.thresholds.len(), 3);
+    }
+
+    #[test]
+    fn test_e2e_pbta_basic_three_tier_resolution_guaranteed() {
+        use rustory::rules::resolver::{resolve_check, CheckResult};
+        use std::collections::HashMap;
+
+        let harness = TestHarness::from_fixture("pbta_basic");
+        let gs = harness.game_state().unwrap();
+        let rules = gs.rules.as_ref().unwrap();
+
+        let move_check = rules
+            .checks
+            .iter()
+            .find(|c| c.name == "move")
+            .unwrap();
+
+        // Guaranteed success: stat = +20, 2d6 (min 2) + 20 = 22, always >= 10
+        let high_stat_char =
+            rustory::game_state::Character::new("HighStat").with_stat("cool", 20.0);
+
+        let mut args = HashMap::new();
+        args.insert("stat".to_string(), "cool".to_string());
+
+        let mut rng = StdRng::seed_from_u64(42);
+        assert_eq!(
+            resolve_check(move_check, &high_stat_char, &args, &mut rng),
+            CheckResult::Success
+        );
+
+        // Guaranteed miss: stat = -20, 2d6 (max 12) + (-20) = -8, always <= 6
+        let low_stat_char =
+            rustory::game_state::Character::new("LowStat").with_stat("cool", -20.0);
+
+        let mut rng2 = StdRng::seed_from_u64(42);
+        assert_eq!(
+            resolve_check(move_check, &low_stat_char, &args, &mut rng2),
+            CheckResult::Failure
+        );
+    }
+
+    #[test]
+    fn test_e2e_pbta_basic_three_tier_resolution_deterministic() {
+        use rustory::rules::resolver::{resolve_check, CheckResult};
+        use std::collections::HashMap;
+
+        let harness = TestHarness::from_fixture("pbta_basic");
+        let gs = harness.game_state().unwrap();
+        let rules = gs.rules.as_ref().unwrap();
+
+        let ghost = gs.get_player("Ghost").unwrap();
+        let move_check = &rules.checks[0];
+
+        let mut args = HashMap::new();
+        args.insert("stat".to_string(), "cool".to_string());
+
+        // Ghost: cool = +1, so 2d6+1 range is 3..13
+        // Miss: <=6, Partial: 7-9, Success: >=10
+        // Same seed always gives same tier
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(42);
+
+        let result1 = resolve_check(move_check, ghost, &args, &mut rng1);
+        let result2 = resolve_check(move_check, ghost, &args, &mut rng2);
+        assert_eq!(result1, result2);
+
+        // Result must be one of the three tiers
+        assert!(
+            result1 == CheckResult::Success
+                || result1 == CheckResult::Failure
+                || matches!(result1, CheckResult::Partial(_)),
+            "Expected one of the three tiers, got: {result1:?}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_pbta_basic_all_three_tiers_reachable() {
+        use rustory::rules::resolver::{resolve_check, CheckResult};
+        use std::collections::HashMap;
+
+        let harness = TestHarness::from_fixture("pbta_basic");
+        let gs = harness.game_state().unwrap();
+        let rules = gs.rules.as_ref().unwrap();
+
+        let ghost = gs.get_player("Ghost").unwrap();
+        let move_check = &rules.checks[0];
+
+        let mut args = HashMap::new();
+        args.insert("stat".to_string(), "cool".to_string());
+
+        // Try many seeds to verify all three tiers are reachable
+        // Ghost: cool=1, range 3..13
+        let mut saw_success = false;
+        let mut saw_partial = false;
+        let mut saw_miss = false;
+
+        for seed in 0..200 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let result = resolve_check(move_check, ghost, &args, &mut rng);
+            match result {
+                CheckResult::Success => saw_success = true,
+                CheckResult::Failure => saw_miss = true,
+                CheckResult::Partial(_) => saw_partial = true,
+                _ => {}
+            }
+            if saw_success && saw_partial && saw_miss {
+                break;
+            }
+        }
+
+        assert!(saw_success, "Success tier should be reachable");
+        assert!(saw_partial, "Partial tier should be reachable");
+        assert!(saw_miss, "Miss tier should be reachable");
+    }
 }

@@ -1,0 +1,17 @@
+[system]
+name = "PbtA"
+version = "2.0"
+
+[stats.definition]
+abilities = ["cool", "hard", "hot", "sharp", "weird"]
+
+[character.schema]
+columns = ["name", "class", "cool", "hard", "hot", "sharp", "weird"]
+
+[check.move]
+roll = "2d6 + {stat}"
+thresholds = [
+  { range = "..6", result = "miss" },
+  { range = "7..9", result = "partial" },
+  { range = "10..", result = "success" },
+]
