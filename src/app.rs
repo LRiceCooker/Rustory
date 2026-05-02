@@ -1412,6 +1412,28 @@ impl App {
         self.scroll_offset = self.scroll_offset.saturating_sub(amount);
     }
 
+    /// Returns a sound status indicator string for the TUI header.
+    /// e.g., "♪ tavern.mp3" when playing, "♪ paused" when paused, "" when stopped.
+    pub fn sound_status_indicator(&self) -> String {
+        let player = match &self.audio_player {
+            Some(p) => p,
+            None => return String::new(),
+        };
+
+        if let Some(track) = player.current_track() {
+            if player.is_paused() {
+                format!("♪ {track} (paused)")
+            } else if player.is_playing() {
+                let looping = if player.is_looping() { " ↻" } else { "" };
+                format!("♪ {track}{looping}")
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    }
+
     pub fn autocomplete_hint(&self) -> Option<String> {
         if self.input.is_empty() {
             return None;
@@ -3120,5 +3142,20 @@ mod tests {
 
         let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
         assert!(output.contains("sound"), "Help should mention sound command. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_status_indicator_no_player() {
+        let mut app = App::new();
+        app.audio_player = None;
+        assert_eq!(app.sound_status_indicator(), "");
+    }
+
+    #[test]
+    fn test_sound_status_indicator_no_track() {
+        let app = App::new();
+        // If audio device is available, no track should give empty string
+        // If no audio device, also empty string
+        assert_eq!(app.sound_status_indicator(), "");
     }
 }

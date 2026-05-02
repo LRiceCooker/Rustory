@@ -23,12 +23,21 @@ pub fn render(frame: &mut Frame, app: &App) {
         Some(gs) => format!("Rustory — {}", gs.campaign_name),
         None => "Rustory".to_string(),
     };
+
+    // Build right-side header: sound indicator + locale
+    let sound_indicator = app.sound_status_indicator();
+    let right_text = if sound_indicator.is_empty() {
+        locale
+    } else {
+        format!("{sound_indicator}  {locale}")
+    };
+
     let header = Paragraph::new("").block(
         Block::default()
             .borders(Borders::ALL)
             .title(title)
             .title_style(Color::Cyan)
-            .title_top(Line::from(locale).right_aligned()),
+            .title_top(Line::from(right_text).right_aligned()),
     );
     frame.render_widget(header, chunks[0]);
 
