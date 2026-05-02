@@ -572,10 +572,28 @@ impl App {
             return None;
         }
         let input_lower = self.input.to_lowercase();
-        crate::commands::mapping::COMMANDS
+
+        // Try built-in commands first
+        let builtin_match = crate::commands::mapping::COMMANDS
             .iter()
             .find(|cmd| cmd.starts_with(&input_lower) && **cmd != input_lower)
-            .map(|cmd| cmd[self.input.len()..].to_string())
+            .map(|cmd| cmd[self.input.len()..].to_string());
+
+        if builtin_match.is_some() {
+            return builtin_match;
+        }
+
+        // Then try custom commands from loaded campaign
+        if let Some(gs) = &self.game_state {
+            let mut custom_names: Vec<&String> = gs.custom_commands.keys().collect();
+            custom_names.sort();
+            return custom_names
+                .iter()
+                .find(|cmd| cmd.starts_with(&input_lower) && ***cmd != input_lower)
+                .map(|cmd| cmd[self.input.len()..].to_string());
+        }
+
+        None
     }
 
     fn insert_char(&mut self, c: char) {
@@ -1540,5 +1558,101 @@ mod tests {
             output_texts.iter().any(|t| t.contains("Script error")),
             "Broken script should show error. Messages: {output_texts:?}"
         );
+    }
+
+    // --- autocomplete tests ---
+
+    #[test]
+    fn test_autocomplete_builtin_commands() {
+        let app = App::new();
+        // No game state loaded, should still autocomplete built-in commands
+        let mut test_app = app;
+        test_app.input = "he".to_string();
+        assert_eq!(test_app.autocomplete_hint(), Some("lp".to_string()));
+
+        test_app.input = "ro".to_string();
+        assert_eq!(test_app.autocomplete_hint(), Some("ll".to_string()));
+
+        test_app.input = "qu".to_string();
+        assert_eq!(test_app.autocomplete_hint(), Some("it".to_string()));
+    }
+
+    #[test]
+    fn test_autocomplete_empty_input_returns_none() {
+        let app = App::new();
+        assert_eq!(app.autocomplete_hint(), None);
+    }
+
+    #[test]
+    fn test_autocomplete_exact_match_returns_none() {
+        let mut app = App::new();
+        app.input = "help".to_string();
+        assert_eq!(app.autocomplete_hint(), None);
+    }
+
+    #[test]
+    fn test_autocomplete_no_match_returns_none() {
+        let mut app = App::new();
+        app.input = "zzz".to_string();
+        assert_eq!(app.autocomplete_hint(), None);
+    }
+
+    #[test]
+    fn test_autocomplete_includes_custom_commands() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("rules/commands")).unwrap();
+        std::fs::write(
+            dir.path().join("rules/commands/smite.lol"),
+            "HAI 1.2\nVISIBLE \"smite!\"\nKTHXBYE\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.load_campaign(dir.path());
+
+        // Custom command should be autocompleted
+        app.input = "sm".to_string();
+        assert_eq!(app.autocomplete_hint(), Some("ite".to_string()));
+    }
+
+    #[test]
+    fn test_autocomplete_custom_commands_only_when_campaign_loaded() {
+        let mut app = App::new();
+        // No campaign loaded — "sm" should not autocomplete
+        app.input = "sm".to_string();
+        assert_eq!(app.autocomplete_hint(), None);
+
+        // Now load a campaign with a custom command
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("rules/commands")).unwrap();
+        std::fs::write(
+            dir.path().join("rules/commands/smite.lol"),
+            "HAI 1.2\nVISIBLE \"smite!\"\nKTHXBYE\n",
+        )
+        .unwrap();
+        app.load_campaign(dir.path());
+
+        // Now it should autocomplete
+        app.input = "sm".to_string();
+        assert_eq!(app.autocomplete_hint(), Some("ite".to_string()));
+    }
+
+    #[test]
+    fn test_autocomplete_builtin_takes_priority_over_custom() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("rules/commands")).unwrap();
+        // Create a custom command starting with "hel" (like "help")
+        std::fs::write(
+            dir.path().join("rules/commands/helfire.lol"),
+            "HAI 1.2\nVISIBLE \"fire!\"\nKTHXBYE\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.load_campaign(dir.path());
+
+        // "hel" should match built-in "help" first, not custom "helfire"
+        app.input = "hel".to_string();
+        assert_eq!(app.autocomplete_hint(), Some("p".to_string()));
     }
 }
