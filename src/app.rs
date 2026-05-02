@@ -8,7 +8,6 @@ use ratatui::DefaultTerminal;
 use crate::commands::dispatcher::{self, CommandResult};
 use crate::game_state::loader;
 use crate::game_state::GameState;
-use crate::rules;
 use crate::ui;
 
 #[derive(Debug, Clone)]
@@ -57,62 +56,13 @@ impl App {
     }
 
     /// Load a campaign from a directory path into the game state.
-    /// Parses `rules/system.toml` if present, then scans `players/` and `npc/`
-    /// subdirectories for character data.
+    /// Delegates to `GameState::load()` which parses `rules/system.toml`
+    /// if present, then scans `players/` and `npc/` subdirectories.
     /// Returns a list of load errors (empty if all loaded successfully).
     pub fn load_campaign(&mut self, path: &Path) -> Vec<loader::LoadError> {
-        let mut gs = GameState::new(path);
-        let mut all_errors = Vec::new();
-
-        // Try to load rules from system.toml
-        let system_toml = path.join("rules").join("system.toml");
-        let expected_columns: Vec<String>;
-
-        if system_toml.exists() {
-            match rules::loader::load_rules(&system_toml) {
-                Ok((campaign_rules, campaign_schema)) => {
-                    expected_columns = campaign_schema
-                        .character_schema
-                        .column_names()
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect();
-                    gs.rules = Some(campaign_rules);
-                    gs.schema = Some(campaign_schema);
-                }
-                Err(rule_errors) => {
-                    for re in rule_errors {
-                        all_errors.push(loader::LoadError {
-                            file: re.file,
-                            message: re.message,
-                            suggestion: re.suggestion,
-                        });
-                    }
-                    expected_columns = Vec::new();
-                }
-            }
-        } else {
-            expected_columns = Vec::new();
-        }
-
-        let expected_refs: Vec<&str> = expected_columns.iter().map(|s| s.as_str()).collect();
-
-        let players_dir = path.join("players");
-        let player_result = loader::load_characters_from_dir(&players_dir, &expected_refs);
-        all_errors.extend(player_result.errors);
-        for player in player_result.characters {
-            gs.add_player(player);
-        }
-
-        let npc_dir = path.join("npc");
-        let npc_result = loader::load_characters_from_dir(&npc_dir, &expected_refs);
-        all_errors.extend(npc_result.errors);
-        for npc in npc_result.characters {
-            gs.add_npc(npc);
-        }
-
+        let (gs, errors) = GameState::load(path);
         self.game_state = Some(gs);
-        all_errors
+        errors
     }
 
     pub fn game_state(&self) -> Option<&GameState> {
