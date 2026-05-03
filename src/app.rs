@@ -499,6 +499,10 @@ impl App {
             self.handle_give_command(args);
             return;
         }
+        if command == mapping::WHO {
+            self.handle_who_command();
+            return;
+        }
         if command == mapping::ENCOUNTER {
             self.handle_encounter_command(args);
             return;
@@ -675,6 +679,7 @@ impl App {
             StyledLine::plain(
                 "  encounter — encounter tables (e.g. encounter ls, encounter roll forest)",
             ),
+            StyledLine::plain("  who      — player dashboard (HP, conditions, location)"),
             StyledLine::plain("  validate — check campaign files against schemas"),
             StyledLine::plain("  quit     — exit Rustory"),
         ];
@@ -2238,6 +2243,98 @@ impl App {
             format!("{from_display} gives {} to {to_display}", item.name),
             Style::default().fg(Color::Blue),
         )]));
+    }
+
+    fn handle_who_command(&mut self) {
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
+                return;
+            }
+        };
+
+        if gs.players.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                "No players loaded.".to_string(),
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::new(
+            format!(
+                "{:<16} {:<14} {:<20} {}",
+                "Name", "HP", "Conditions", "Location"
+            ),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        for ch in &gs.players {
+            // HP bar
+            let hp_str = if let Some(gauge) = ch.gauges.get("hp") {
+                let pct = if gauge.max > 0.0 {
+                    (gauge.current / gauge.max * 100.0) as u32
+                } else {
+                    0
+                };
+                let filled = (pct / 10) as usize;
+                let empty = 10_usize.saturating_sub(filled);
+                format!(
+                    "{}/{} [{}{}]",
+                    gauge.current as i64,
+                    gauge.max as i64,
+                    "#".repeat(filled),
+                    "-".repeat(empty),
+                )
+            } else {
+                "—".to_string()
+            };
+
+            // Conditions
+            let active: Vec<&str> = ch
+                .conditions
+                .iter()
+                .filter(|c| c.active)
+                .map(|c| c.name.as_str())
+                .collect();
+            let cond_str = if active.is_empty() {
+                "—".to_string()
+            } else {
+                active.join(", ")
+            };
+
+            // Location
+            let loc_str = ch
+                .location
+                .as_deref()
+                .unwrap_or("—");
+
+            // Color based on HP percentage
+            let color = if let Some(gauge) = ch.gauges.get("hp") {
+                let pct = if gauge.max > 0.0 {
+                    (gauge.current / gauge.max * 100.0) as u32
+                } else {
+                    0
+                };
+                if pct > 60 {
+                    Color::Green
+                } else if pct > 30 {
+                    Color::Yellow
+                } else {
+                    Color::Red
+                }
+            } else {
+                Color::Blue
+            };
+
+            lines.push(StyledLine::new(
+                format!("{:<16} {:<14} {:<20} {}", ch.name, hp_str, cond_str, loc_str),
+                Style::default().fg(color),
+            ));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
     }
 
     fn handle_list_command(&mut self, args: &str) {
@@ -8122,6 +8219,145 @@ mod tests {
             .get_gauge("hp")
             .unwrap();
         assert_eq!(hp.current, 47.0);
+    }
+
+    // --- Who command tests ---
+
+    fn setup_who_campaign(dir: &Path) -> PathBuf {
+        let campaign = dir.join("who_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"hp_max\"]\n\n[resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign.join("players/thorin/sheet.csv"),
+            "name,hp_max\nThorin,52\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/elara")).unwrap();
+        std::fs::write(
+            campaign.join("players/elara/sheet.csv"),
+            "name,hp_max\nElara,40\n",
+        )
+        .unwrap();
+        campaign
+    }
+
+    #[test]
+    fn test_who_shows_all_players_with_stats() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_who_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("who");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Thorin"),
+            "Should show Thorin. Got: {output}"
+        );
+        assert!(
+            output.contains("Elara"),
+            "Should show Elara. Got: {output}"
+        );
+        assert!(
+            output.contains("52/52"),
+            "Should show Thorin HP 52/52. Got: {output}"
+        );
+        assert!(
+            output.contains("40/40"),
+            "Should show Elara HP 40/40. Got: {output}"
+        );
+        // Should show HP bar
+        assert!(
+            output.contains("[##########]"),
+            "Should show full HP bar. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_who_shows_conditions() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_who_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // Add a condition to Thorin
+        if let Some(gs) = &mut app.game_state {
+            if let Some(player) = gs.players.iter_mut().find(|p| p.name == "Thorin") {
+                player.conditions.push(crate::game_state::primitives::Condition {
+                    name: "Poisoned".to_string(),
+                    active: true,
+                });
+            }
+        }
+        app.messages.clear();
+
+        app.dispatch_command("who");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Poisoned"),
+            "Should show Poisoned condition. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_who_shows_location() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_who_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // Set location for Thorin
+        if let Some(gs) = &mut app.game_state {
+            if let Some(player) = gs.players.iter_mut().find(|p| p.name == "Thorin") {
+                player.location = Some("Thornwall".to_string());
+            }
+        }
+        app.messages.clear();
+
+        app.dispatch_command("who");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Thornwall"),
+            "Should show Thornwall location. Got: {output}"
+        );
+        // Elara should show the dash for no location
+        assert!(
+            output.contains("\u{2014}"),
+            "Should show em-dash for missing location. Got: {output}"
+        );
     }
 
     // --- Give command tests ---
