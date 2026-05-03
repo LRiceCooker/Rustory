@@ -487,6 +487,10 @@ impl App {
             self.handle_damage_command(args);
             return;
         }
+        if command == mapping::HEAL || command == mapping::HEAL_ALIAS {
+            self.handle_heal_command(args);
+            return;
+        }
         if command == mapping::ENCOUNTER {
             self.handle_encounter_command(args);
             return;
@@ -1976,6 +1980,103 @@ impl App {
         self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
             format!("{ch_name}: {old_hp} → {new_hp} HP"),
             Style::default().fg(Color::Red),
+        )]));
+    }
+
+    fn handle_heal_command(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: heal <character> <amount> (e.g. heal thorin 10)".to_string(),
+            ));
+            return;
+        }
+
+        if self.game_state.is_none() {
+            self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
+            return;
+        }
+
+        // Parse args: either "amount" (use current target) or "character amount"
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+
+        let (char_name, amount_str) = if parts.len() == 1 {
+            // Single arg — must be amount, use current target
+            match &self.current_target {
+                Some(target) => (target.clone(), parts[0]),
+                None => {
+                    self.apply_command_result(CommandResult::Error(
+                        "No target set. Use: heal <character> <amount>".to_string(),
+                    ));
+                    return;
+                }
+            }
+        } else {
+            (parts[0].to_string(), parts[1])
+        };
+
+        let amount: f64 = match amount_str.parse() {
+            Ok(v) if v >= 0.0 => v,
+            _ => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Invalid heal amount \"{amount_str}\". Must be a non-negative number."
+                )));
+                return;
+            }
+        };
+
+        let gs = self.game_state.as_mut().unwrap();
+        let name_lower = char_name.to_lowercase();
+
+        // Find character (player or NPC)
+        let (character, is_player) = {
+            if let Some(ch) = gs
+                .players
+                .iter_mut()
+                .find(|c| c.name.to_lowercase() == name_lower)
+            {
+                (ch, true)
+            } else if let Some(ch) = gs
+                .npcs
+                .iter_mut()
+                .find(|c| c.name.to_lowercase() == name_lower)
+            {
+                (ch, false)
+            } else {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Character \"{char_name}\" not found."
+                )));
+                return;
+            }
+        };
+
+        let gauge_name = "hp".to_string();
+        if !character.gauges.contains_key(&gauge_name) {
+            let ch_name = character.name.clone();
+            self.apply_command_result(CommandResult::Error(format!(
+                "Character \"{ch_name}\" has no HP gauge."
+            )));
+            return;
+        }
+
+        let gauge = character.gauges.get_mut(&gauge_name).unwrap();
+        let old_hp = gauge.current;
+        gauge.heal(amount);
+        let new_hp = gauge.current;
+        let ch_name = character.name.clone();
+
+        // Persist
+        if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &gs.schema) {
+            let _ = pl.persist_character(
+                character,
+                is_player,
+                schema,
+                &format!("{ch_name} healed {amount} HP ({old_hp} -> {new_hp})"),
+            );
+        }
+
+        self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+            format!("{ch_name}: {old_hp} → {new_hp} HP"),
+            Style::default().fg(Color::Green),
         )]));
     }
 
@@ -4469,7 +4570,7 @@ mod tests {
         // No game state loaded, should still autocomplete built-in commands
         let mut test_app = app;
         test_app.input = "he".to_string();
-        assert_eq!(test_app.autocomplete_hint(), Some("lp".to_string()));
+        assert_eq!(test_app.autocomplete_hint(), Some("al".to_string()));
 
         test_app.input = "ro".to_string();
         assert_eq!(test_app.autocomplete_hint(), Some("ll".to_string()));
@@ -4563,8 +4664,8 @@ mod tests {
     fn test_tab_accepts_autocomplete_hint() {
         let mut app = App::new();
         app.running = true;
-        app.input = "he".to_string();
-        app.cursor_position = 2;
+        app.input = "hel".to_string();
+        app.cursor_position = 3;
 
         // Tab should fill "help"
         app.on_key(KeyEvent::from(KeyCode::Tab));
@@ -7605,5 +7706,149 @@ mod tests {
             .get_gauge("hp")
             .unwrap();
         assert_eq!(hp.current, 42.0);
+    }
+
+    // --- Heal command tests ---
+
+    #[test]
+    fn test_heal_increases_hp() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_damage_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // First damage to lower HP
+        app.dispatch_command("damage thorin 20");
+        app.messages.clear();
+
+        // Now heal
+        app.dispatch_command("heal thorin 10");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("32"),
+            "Should show old HP 32. Got: {output}"
+        );
+        assert!(
+            output.contains("42"),
+            "Should show new HP 42. Got: {output}"
+        );
+
+        let hp = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap();
+        assert_eq!(hp.current, 42.0);
+    }
+
+    #[test]
+    fn test_heal_capped_at_max() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_damage_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // Damage a little, then overheal
+        app.dispatch_command("damage thorin 5");
+        app.messages.clear();
+
+        app.dispatch_command("heal thorin 999");
+
+        let hp = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap();
+        assert_eq!(hp.current, 52.0);
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("52"),
+            "Should show HP capped at max 52. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_heal_with_target() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_damage_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // Damage first
+        app.dispatch_command("damage thorin 20");
+        app.messages.clear();
+
+        // Set current target
+        app.current_target = Some("Thorin".to_string());
+
+        // Heal with just amount (uses current target)
+        app.dispatch_command("heal 10");
+
+        let hp = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap();
+        assert_eq!(hp.current, 42.0);
+    }
+
+    #[test]
+    fn test_heal_alias_hp() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_damage_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // Damage first
+        app.dispatch_command("damage thorin 10");
+        app.messages.clear();
+
+        // Use 'hp' alias
+        app.dispatch_command("hp thorin 5");
+
+        let hp = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap();
+        assert_eq!(hp.current, 47.0);
     }
 }
