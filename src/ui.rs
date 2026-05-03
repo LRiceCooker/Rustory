@@ -1,5 +1,5 @@
-use ratatui::layout::{Constraint, Direction, Layout, Position};
-use ratatui::style::{Color, Style};
+use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
@@ -46,30 +46,29 @@ pub fn render(frame: &mut Frame, app: &App) {
             crate::map::renderer::render_map(world_map, &app.map_viewport, chunks[1], &mut buf);
             *frame.buffer_mut() = buf;
         }
+    } else if app.mode == Mode::Combat {
+        // Split main area: combat dashboard + output history
+        let combat_height = app.initiative_tracker.as_ref()
+            .map(|t| t.len() as u16 + 3) // combatants + border + header
+            .unwrap_or(3)
+            .min(chunks[1].height / 2)
+            .max(3);
+
+        let combat_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(combat_height),
+                Constraint::Min(0),
+            ])
+            .split(chunks[1]);
+
+        render_combat_dashboard(frame, app, combat_chunks[0]);
+        render_output_history(frame, app, combat_chunks[1]);
     } else {
-        // Build output history from messages
-        let lines: Vec<Line> = app
-            .messages
-            .iter()
-            .map(|msg| Line::from(Span::styled(msg.text.clone(), msg.style)))
-            .collect();
-
-        // Calculate scroll: auto-scroll to bottom, offset by user scroll
-        let inner_height = chunks[1].height.saturating_sub(2) as usize;
-        let max_scroll = if lines.len() > inner_height {
-            (lines.len() - inner_height) as u16
-        } else {
-            0
-        };
-        let scroll = max_scroll.saturating_sub(app.scroll_offset).min(max_scroll);
-
-        let main_area = Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL))
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0));
-        frame.render_widget(main_area, chunks[1]);
+        render_output_history(frame, app, chunks[1]);
     }
 
+    // Input bar
     let prompt = app.mode.prompt();
     let mut input_spans = vec![Span::raw(prompt.to_string()), Span::raw(app.input.clone())];
     if let Some(hint) = app.autocomplete_hint() {
@@ -84,4 +83,104 @@ pub fn render(frame: &mut Frame, app: &App) {
     let cursor_x = chunks[2].x + 1 + prompt.len() as u16 + app.cursor_position as u16;
     let cursor_y = chunks[2].y + 1; // +1 for the top border
     frame.set_cursor_position(Position::new(cursor_x, cursor_y));
+}
+
+fn render_output_history(frame: &mut Frame, app: &App, area: Rect) {
+    let lines: Vec<Line> = app
+        .messages
+        .iter()
+        .map(|msg| Line::from(Span::styled(msg.text.clone(), msg.style)))
+        .collect();
+
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let max_scroll = if lines.len() > inner_height {
+        (lines.len() - inner_height) as u16
+    } else {
+        0
+    };
+    let scroll = max_scroll.saturating_sub(app.scroll_offset).min(max_scroll);
+
+    let main_area = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    frame.render_widget(main_area, area);
+}
+
+fn render_combat_dashboard(frame: &mut Frame, app: &App, area: Rect) {
+    let tracker = match app.initiative_tracker.as_ref() {
+        Some(t) => t,
+        None => {
+            let empty = Paragraph::new("No initiative tracker.")
+                .block(Block::default().borders(Borders::ALL).title("Combat"));
+            frame.render_widget(empty, area);
+            return;
+        }
+    };
+
+    if tracker.is_empty() {
+        let empty = Paragraph::new("No combatants. Use 'init add <name> <value>'.")
+            .block(Block::default().borders(Borders::ALL).title("Combat"));
+        frame.render_widget(empty, area);
+        return;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, combatant) in tracker.all().iter().enumerate() {
+        let marker = if combatant.is_current { ">> " } else { "   " };
+        let mut spans = vec![
+            Span::raw(format!("{marker}{}. ", i + 1)),
+        ];
+
+        // Name — highlight if current
+        if combatant.is_current {
+            spans.push(Span::styled(
+                combatant.name.clone(),
+                Style::default().fg(Color::Yellow).bold(),
+            ));
+        } else {
+            spans.push(Span::raw(combatant.name.clone()));
+        }
+
+        spans.push(Span::raw(format!("  (init: {})", combatant.initiative)));
+
+        // HP bar from game state
+        if let Some(gs) = &app.game_state {
+            let character = gs.players.iter().chain(gs.npcs.iter())
+                .find(|c| c.name == combatant.name);
+            if let Some(ch) = character {
+                if let Some(gauge) = ch.gauges.get("hp") {
+                    let ratio = if gauge.max > 0.0 { gauge.current / gauge.max } else { 1.0 };
+                    let hp_color = if ratio > 0.5 {
+                        Color::Green
+                    } else if ratio > 0.25 {
+                        Color::Yellow
+                    } else {
+                        Color::Red
+                    };
+                    spans.push(Span::styled(
+                        format!("  HP: {}/{}", gauge.current, gauge.max),
+                        Style::default().fg(hp_color),
+                    ));
+                }
+
+                let conditions: Vec<&str> = ch.conditions.iter()
+                    .filter(|c| c.active)
+                    .map(|c| c.name.as_str())
+                    .collect();
+                if !conditions.is_empty() {
+                    spans.push(Span::styled(
+                        format!("  [{}]", conditions.join(", ")),
+                        Style::default().fg(Color::Magenta),
+                    ));
+                }
+            }
+        }
+
+        lines.push(Line::from(spans));
+    }
+
+    let dashboard = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title("Initiative"));
+    frame.render_widget(dashboard, area);
 }

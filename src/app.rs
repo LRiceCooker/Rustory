@@ -5979,4 +5979,72 @@ mod tests {
         let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
         assert!(output.contains("Not in combat mode"), "Should show error. Got: {output}");
     }
+
+    // ---- Combat dashboard render tests ----
+
+    fn render_app_to_buffer(app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| crate::ui::render(frame, app)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn buffer_content(buf: &ratatui::buffer::Buffer) -> String {
+        buf.content().iter().map(|cell| cell.symbol()).collect()
+    }
+
+    #[test]
+    fn test_combat_dashboard_renders_non_empty() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.dispatch_command("init add Thorin 18");
+        app.dispatch_command("init add Goblin 12");
+
+        let buf = render_app_to_buffer(&app, 80, 25);
+        let content = buffer_content(&buf);
+        assert!(content.contains("Initiative"), "Should render Initiative panel. Content: {content}");
+        assert!(content.contains("Thorin"), "Should show Thorin in dashboard");
+        assert!(content.contains("Goblin"), "Should show Goblin in dashboard");
+    }
+
+    #[test]
+    fn test_combat_dashboard_shows_current_turn_marker() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.dispatch_command("init add Thorin 18");
+        app.dispatch_command("init add Goblin 12");
+
+        let buf = render_app_to_buffer(&app, 80, 25);
+        let content = buffer_content(&buf);
+        assert!(content.contains(">>"), "Should show current turn marker. Content: {content}");
+    }
+
+    #[test]
+    fn test_combat_dashboard_marker_moves_after_next() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.dispatch_command("init add Thorin 18");
+        app.dispatch_command("init add Goblin 12");
+
+        // Initially Thorin is current (highest initiative)
+        let buf1 = render_app_to_buffer(&app, 80, 25);
+        let content1 = buffer_content(&buf1);
+        // >> should appear before Thorin
+        let marker_pos = content1.find(">>").expect("Should have >> marker");
+        let thorin_pos = content1.find("Thorin").expect("Should have Thorin");
+        assert!(marker_pos < thorin_pos, ">> should be before Thorin (current)");
+
+        // After next, Goblin is current
+        app.dispatch_command("next");
+        let buf2 = render_app_to_buffer(&app, 80, 25);
+        let content2 = buffer_content(&buf2);
+        let marker_pos2 = content2.find(">>").expect("Should have >> marker after next");
+        let goblin_pos = content2.find("Goblin").expect("Should have Goblin");
+        assert!(marker_pos2 < goblin_pos, ">> should be before Goblin (current) after next");
+    }
 }
