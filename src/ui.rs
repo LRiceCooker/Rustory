@@ -4,9 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::App;
-
-const PROMPT: &str = "rustory > ";
+use crate::app::{App, Mode};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
@@ -41,8 +39,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(header, chunks[0]);
 
-    // Main area: either map canvas or output history
-    if app.map_mode {
+    // Main area: depends on mode
+    if app.mode == Mode::Map {
         if let Some(ref world_map) = app.world_map {
             let mut buf = frame.buffer_mut().clone();
             crate::map::renderer::render_map(world_map, &app.map_viewport, chunks[1], &mut buf);
@@ -72,7 +70,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         frame.render_widget(main_area, chunks[1]);
     }
 
-    let mut input_spans = vec![Span::raw(PROMPT.to_string()), Span::raw(app.input.clone())];
+    let prompt = app.mode.prompt();
+    let mut input_spans = vec![Span::raw(prompt.to_string()), Span::raw(app.input.clone())];
     if let Some(hint) = app.autocomplete_hint() {
         input_spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     }
@@ -82,7 +81,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     // Position cursor after the prompt + user's cursor position
     // +1 for the left border
-    let cursor_x = chunks[2].x + 1 + PROMPT.len() as u16 + app.cursor_position as u16;
+    let cursor_x = chunks[2].x + 1 + prompt.len() as u16 + app.cursor_position as u16;
     let cursor_y = chunks[2].y + 1; // +1 for the top border
     frame.set_cursor_position(Position::new(cursor_x, cursor_y));
 }

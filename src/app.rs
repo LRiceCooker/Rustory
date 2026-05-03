@@ -43,6 +43,24 @@ pub struct Message {
     pub style: Style,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    #[default]
+    Default,
+    Map,
+    Combat,
+}
+
+impl Mode {
+    pub fn prompt(&self) -> &'static str {
+        match self {
+            Mode::Default => "rustory > ",
+            Mode::Map => "rustory [map] > ",
+            Mode::Combat => "rustory [combat] > ",
+        }
+    }
+}
+
 pub struct App {
     pub running: bool,
     pub input: String,
@@ -54,7 +72,7 @@ pub struct App {
     pub scroll_offset: u16,
     pub rng: Box<dyn RngCore>,
     pub game_state: Option<GameState>,
-    pub map_mode: bool,
+    pub mode: Mode,
     pub map_viewport: MapViewport,
     pub world_map: Option<WorldMap>,
     pub audio_player: Option<AudioPlayer>,
@@ -86,7 +104,7 @@ impl App {
             scroll_offset: 0,
             rng,
             game_state: None,
-            map_mode: false,
+            mode: Mode::Default,
             map_viewport: MapViewport::default(),
             world_map: None,
             audio_player: AudioPlayer::new().ok(),
@@ -114,7 +132,7 @@ impl App {
         } else {
             self.world_map = None;
         }
-        self.map_mode = false;
+        self.mode = Mode::Default;
         self.map_viewport = MapViewport::default();
 
         // Load SoundLibrary from sound/ if present (optional)
@@ -162,9 +180,9 @@ impl App {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
-        if self.map_mode {
+        if self.mode == Mode::Map {
             match (key.code, key.modifiers) {
-                (KeyCode::Esc, _) => self.map_mode = false,
+                (KeyCode::Esc, _) => self.mode = Mode::Default,
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => self.running = false,
                 (KeyCode::Up, _) => self.map_viewport.pan(0.0, 50.0),
                 (KeyCode::Down, _) => self.map_viewport.pan(0.0, -50.0),
@@ -704,15 +722,16 @@ impl App {
         }
 
         if args.is_empty() {
-            self.map_mode = !self.map_mode;
-            if self.map_mode {
+            if self.mode == Mode::Map {
+                self.mode = Mode::Default;
                 self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                    "Map mode ON. Arrow keys: pan. +/-: zoom. Esc: exit map.".to_string(),
+                    "Map mode OFF.".to_string(),
                     Style::default().fg(Color::Green),
                 )]));
             } else {
+                self.mode = Mode::Map;
                 self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                    "Map mode OFF.".to_string(),
+                    "Map mode ON. Arrow keys: pan. +/-: zoom. Esc: exit map.".to_string(),
                     Style::default().fg(Color::Green),
                 )]));
             }
@@ -3655,7 +3674,7 @@ mod tests {
             output_texts.iter().any(|t| t.contains("No map loaded")),
             "Map without world.json should show error. Messages: {output_texts:?}"
         );
-        assert!(!app.map_mode);
+        assert!(app.mode != Mode::Map);
     }
 
     fn make_test_world_map() -> crate::map::world::WorldMap {
@@ -3693,10 +3712,10 @@ mod tests {
         app.world_map = Some(make_test_world_map());
 
         app.dispatch_command("map");
-        assert!(app.map_mode, "map command should enable map mode");
+        assert!(app.mode == Mode::Map, "map command should enable map mode");
 
         app.dispatch_command("map");
-        assert!(!app.map_mode, "map command again should disable map mode");
+        assert!(app.mode == Mode::Default, "map command again should disable map mode");
     }
 
     #[test]
@@ -3886,7 +3905,7 @@ mod tests {
     fn test_map_mode_arrow_keys_pan() {
         let mut app = App::new();
         app.running = true;
-        app.map_mode = true;
+        app.mode = Mode::Map;
         let json = r##"{"pack": {}}"##;
         app.world_map = Some(
             crate::map::world::WorldMap::from_parsed(
@@ -3914,11 +3933,11 @@ mod tests {
     fn test_map_mode_escape_exits() {
         let mut app = App::new();
         app.running = true;
-        app.map_mode = true;
+        app.mode = Mode::Map;
 
         app.on_key(KeyEvent::from(KeyCode::Esc));
         assert!(
-            !app.map_mode,
+            app.mode == Mode::Default,
             "Esc in map mode should exit map mode, not quit"
         );
         assert!(app.running, "App should still be running after Esc in map mode");
@@ -3928,7 +3947,7 @@ mod tests {
     fn test_map_mode_zoom() {
         let mut app = App::new();
         app.running = true;
-        app.map_mode = true;
+        app.mode = Mode::Map;
 
         let initial_zoom = app.map_viewport.zoom;
         app.on_key(KeyEvent::from(KeyCode::Char('+')));
@@ -5237,5 +5256,80 @@ mod tests {
 
         let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
         assert!(output.contains("dragon"), "Should report missing template. Got: {output}");
+    }
+
+    // ---- Mode system tests ----
+
+    #[test]
+    fn test_mode_default_prompt() {
+        assert_eq!(Mode::Default.prompt(), "rustory > ");
+    }
+
+    #[test]
+    fn test_mode_map_prompt() {
+        assert_eq!(Mode::Map.prompt(), "rustory [map] > ");
+    }
+
+    #[test]
+    fn test_mode_combat_prompt() {
+        assert_eq!(Mode::Combat.prompt(), "rustory [combat] > ");
+    }
+
+    #[test]
+    fn test_app_starts_in_default_mode() {
+        let app = App::new();
+        assert_eq!(app.mode, Mode::Default);
+    }
+
+    #[test]
+    fn test_map_command_switches_to_map_mode() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+
+        app.dispatch_command("map");
+        assert_eq!(app.mode, Mode::Map);
+    }
+
+    #[test]
+    fn test_map_command_toggles_back_to_default() {
+        let mut app = App::new();
+        app.running = true;
+        app.world_map = Some(make_test_world_map());
+
+        app.dispatch_command("map");
+        assert_eq!(app.mode, Mode::Map);
+
+        app.dispatch_command("map");
+        assert_eq!(app.mode, Mode::Default);
+    }
+
+    #[test]
+    fn test_esc_in_map_mode_returns_to_default() {
+        let mut app = App::new();
+        app.running = true;
+        app.mode = Mode::Map;
+
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Default);
+        assert!(app.running, "App should still be running");
+    }
+
+    #[test]
+    fn test_load_campaign_resets_mode_to_default() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("mode_reset");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        ).unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.mode = Mode::Map;
+
+        app.load_campaign(&campaign);
+        assert_eq!(app.mode, Mode::Default, "Loading campaign should reset mode to Default");
     }
 }

@@ -1299,7 +1299,7 @@ KTHXBYE",
         let mut harness = TestHarness::from_campaign(&campaign);
         harness.execute("map");
 
-        assert!(harness.app.map_mode, "Should be in map mode");
+        assert!(harness.app.mode == rustory::app::Mode::Map, "Should be in map mode");
 
         let buf = harness.render(80, 25);
         assert!(
