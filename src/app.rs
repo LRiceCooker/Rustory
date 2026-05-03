@@ -319,7 +319,7 @@ impl App {
             self.handle_set_command(args);
             return;
         }
-        if command == mapping::LIST {
+        if command == mapping::LIST || command == mapping::LIST_ALIAS {
             self.handle_list_command(args);
             return;
         }
@@ -523,7 +523,7 @@ impl App {
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
             StyledLine::plain("  show     — display character sheet (e.g. show thorin)"),
             StyledLine::plain("  set      — set a character field (e.g. set thorin.hp 35)"),
-            StyledLine::plain("  list     — list players or npcs (e.g. list players)"),
+            StyledLine::plain("  ls       — list players or npcs (e.g. ls players)"),
             StyledLine::plain("  history  — show recent state changes (e.g. history 5)"),
             StyledLine::plain("  undo     — revert the last state change"),
             StyledLine::plain("  redo     — re-apply the last undone change"),
@@ -1761,11 +1761,16 @@ impl App {
             }
         };
 
-        let list_type = if args.is_empty() {
-            "players"
-        } else {
-            args.trim()
-        };
+        let list_type = args.trim();
+
+        if list_type.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![
+                StyledLine::plain("Usage: ls <subcommand>"),
+                StyledLine::plain("  ls players — list player characters"),
+                StyledLine::plain("  ls npc     — list NPCs"),
+            ]));
+            return;
+        }
 
         match list_type {
             "players" => {
@@ -1790,7 +1795,7 @@ impl App {
                 }
                 self.apply_command_result(CommandResult::Output(lines));
             }
-            "npcs" => {
+            "npc" | "npcs" => {
                 if gs.npcs.is_empty() {
                     self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
                         "No NPCs loaded.".to_string(),
@@ -1814,7 +1819,7 @@ impl App {
             }
             other => {
                 self.apply_command_result(CommandResult::Error(format!(
-                    "Unknown list type \"{other}\". Try: players, npcs"
+                    "Unknown subcommand \"{other}\". Try: ls players, ls npc"
                 )));
             }
         }
@@ -5330,9 +5335,105 @@ mod tests {
     }
 
     #[test]
-    fn test_list_players() {
+    fn test_ls_players() {
         let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("list_test");
+        let campaign = dir.path().join("ls_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/hero")).unwrap();
+        std::fs::write(
+            campaign.join("players/hero/sheet.csv"),
+            "name,strength\nHero,15\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls players");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(output.contains("Hero"), "Should list Hero. Got: {output}");
+    }
+
+    #[test]
+    fn test_ls_npc_empty() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_empty");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls npc");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No NPCs"),
+            "Should report no NPCs. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_ls_no_args_shows_subcommands() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_noargs");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("ls players") && output.contains("ls npc"),
+            "Should show available subcommands. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_list_alias_works() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("list_alias");
         std::fs::create_dir_all(campaign.join("rules")).unwrap();
         std::fs::write(
             campaign.join("rules/system.toml"),
@@ -5360,37 +5461,9 @@ mod tests {
             .cloned()
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(output.contains("Hero"), "Should list Hero. Got: {output}");
-    }
-
-    #[test]
-    fn test_list_npcs_empty() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("list_empty");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"T\"\n",
-        )
-        .unwrap();
-
-        let mut app = App::new();
-        app.running = true;
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("list npcs");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
         assert!(
-            output.contains("No NPCs"),
-            "Should report no NPCs. Got: {output}"
+            output.contains("Hero"),
+            "list alias should still work. Got: {output}"
         );
     }
 

@@ -1568,7 +1568,7 @@ KTHXBYE",
     }
 
     #[test]
-    fn test_e2e_list_players() {
+    fn test_e2e_ls_players() {
         let campaign = TestCampaign::new()
             .with_system_toml(
                 "[system]\nname = \"ListTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
@@ -1577,7 +1577,7 @@ KTHXBYE",
             .with_player("elara", "name,strength\nElara,8\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
-        harness.execute("list players");
+        harness.execute("ls players");
 
         let all_output: String = harness
             .output_history()
@@ -1861,7 +1861,7 @@ KTHXBYE",
     }
 
     #[test]
-    fn test_e2e_list_npcs_shows_spawned_creatures() {
+    fn test_e2e_ls_npc_shows_spawned_creatures() {
         let campaign = bestiary_test_campaign();
         let mut harness = TestHarness::from_campaign(&campaign);
 
@@ -1869,7 +1869,7 @@ KTHXBYE",
         harness.execute("spawn goblin");
         harness.execute("encounter goblin patrol");
 
-        harness.execute("list npcs");
+        harness.execute("ls npc");
 
         let all_output: String = harness
             .output_history()
@@ -2177,23 +2177,23 @@ success = \"result >= dc\"
         );
 
         // 14. List players/npcs
-        harness.execute("list players");
+        harness.execute("ls players");
         let out: String = harness
             .output_history()
             .iter()
             .map(|m| m.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(out.contains("Thorin"), "list should show Thorin");
+        assert!(out.contains("Thorin"), "ls should show Thorin");
 
-        harness.execute("list npcs");
+        harness.execute("ls npc");
         let out: String = harness
             .output_history()
             .iter()
             .map(|m| m.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(out.contains("Goblin"), "list should show Goblin");
+        assert!(out.contains("Goblin"), "ls should show Goblin");
 
         // 15. TUI renders correctly (no header bar, just main area + input)
         let buf = harness.render(80, 25);

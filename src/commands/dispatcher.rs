@@ -115,8 +115,8 @@ pub fn dispatch(
             CommandResult::Error("show command must be handled by the app".to_string())
         }
         mapping::SET => CommandResult::Error("set command must be handled by the app".to_string()),
-        mapping::LIST => {
-            CommandResult::Error("list command must be handled by the app".to_string())
+        mapping::LIST | mapping::LIST_ALIAS => {
+            CommandResult::Error("ls command must be handled by the app".to_string())
         }
         mapping::HISTORY => {
             CommandResult::Error("history command must be handled by the app".to_string())
