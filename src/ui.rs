@@ -9,41 +9,14 @@ use crate::app::{App, Mode};
 pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(0),
-            Constraint::Length(3),
-        ])
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
         .split(frame.area());
-
-    let locale = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
-    let title = match &app.game_state {
-        Some(gs) => format!("Rustory — {}", gs.campaign_name),
-        None => "Rustory".to_string(),
-    };
-
-    // Build right-side header: sound indicator + locale
-    let sound_indicator = app.sound_status_indicator();
-    let right_text = if sound_indicator.is_empty() {
-        locale
-    } else {
-        format!("{sound_indicator}  {locale}")
-    };
-
-    let header = Paragraph::new("").block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .title_style(Color::Cyan)
-            .title_top(Line::from(right_text).right_aligned()),
-    );
-    frame.render_widget(header, chunks[0]);
 
     // Main area: depends on mode
     if app.mode == Mode::Map {
         if let Some(ref world_map) = app.world_map {
             let mut buf = frame.buffer_mut().clone();
-            crate::map::renderer::render_map(world_map, &app.map_viewport, chunks[1], &mut buf);
+            crate::map::renderer::render_map(world_map, &app.map_viewport, chunks[0], &mut buf);
             *frame.buffer_mut() = buf;
         }
     } else if app.mode == Mode::Combat {
@@ -53,18 +26,18 @@ pub fn render(frame: &mut Frame, app: &App) {
             .as_ref()
             .map(|t| t.len() as u16 + 3) // combatants + border + header
             .unwrap_or(3)
-            .min(chunks[1].height / 2)
+            .min(chunks[0].height / 2)
             .max(3);
 
         let combat_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(combat_height), Constraint::Min(0)])
-            .split(chunks[1]);
+            .split(chunks[0]);
 
         render_combat_dashboard(frame, app, combat_chunks[0]);
         render_output_history(frame, app, combat_chunks[1]);
     } else {
-        render_output_history(frame, app, chunks[1]);
+        render_output_history(frame, app, chunks[0]);
     }
 
     // Input bar
@@ -75,12 +48,12 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     let input_bar =
         Paragraph::new(Line::from(input_spans)).block(Block::default().borders(Borders::ALL));
-    frame.render_widget(input_bar, chunks[2]);
+    frame.render_widget(input_bar, chunks[1]);
 
     // Position cursor after the prompt + user's cursor position
     // +1 for the left border
-    let cursor_x = chunks[2].x + 1 + prompt.len() as u16 + app.cursor_position as u16;
-    let cursor_y = chunks[2].y + 1; // +1 for the top border
+    let cursor_x = chunks[1].x + 1 + prompt.len() as u16 + app.cursor_position as u16;
+    let cursor_y = chunks[1].y + 1; // +1 for the top border
     frame.set_cursor_position(Position::new(cursor_x, cursor_y));
 }
 

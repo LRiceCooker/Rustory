@@ -273,7 +273,6 @@ mod tests {
     fn test_harness_render() {
         let harness = TestHarness::new();
         let buf = harness.render(60, 20);
-        assert!(buffer_contains(&buf, "Rustory"));
         assert!(buffer_contains(&buf, "rustory >"));
     }
 
@@ -281,7 +280,7 @@ mod tests {
     fn test_buffer_contains() {
         let harness = TestHarness::new();
         let buf = harness.render(60, 20);
-        assert!(buffer_contains(&buf, "Rustory"));
+        assert!(buffer_contains(&buf, "rustory >"));
         assert!(!buffer_contains(&buf, "nonexistent_text_xyz"));
     }
 
@@ -289,9 +288,7 @@ mod tests {
     fn test_buffer_line_contains() {
         let harness = TestHarness::new();
         let buf = harness.render(60, 20);
-        // Header is on line 0
-        assert!(buffer_line_contains(&buf, 0, "Rustory"));
-        // Input bar is on the last few lines
+        // Input bar is on the last few lines (no header, so layout is main area + input bar)
         let last_line = 20 - 2; // inside the input bar
         assert!(buffer_line_contains(&buf, last_line, "rustory >"));
     }
@@ -922,15 +919,15 @@ mod tests {
     }
 
     #[test]
-    fn test_e2e_load_dnd_basic_header_shows_campaign_name() {
+    fn test_e2e_load_dnd_basic_shows_prompt() {
         let mut harness = TestHarness::new();
         harness.execute("load tests/e2e/fixtures/dnd_basic");
 
-        // Render and check header contains campaign name
+        // Render and check prompt is visible (no header bar)
         let buf = harness.render(80, 24);
         assert!(
-            buffer_contains(&buf, "dnd_basic"),
-            "Header should show campaign name 'dnd_basic'"
+            buffer_contains(&buf, "rustory >"),
+            "Should show prompt after loading campaign"
         );
     }
 
@@ -2198,12 +2195,8 @@ success = \"result >= dc\"
             .join("\n");
         assert!(out.contains("Goblin"), "list should show Goblin");
 
-        // 15. TUI renders correctly
+        // 15. TUI renders correctly (no header bar, just main area + input)
         let buf = harness.render(80, 25);
-        assert!(
-            buffer_contains(&buf, "Rustory"),
-            "Header should show Rustory"
-        );
         assert!(
             buffer_contains(&buf, "rustory >"),
             "Should show default prompt"
