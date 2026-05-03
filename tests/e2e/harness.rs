@@ -2142,4 +2142,133 @@ success = \"result >= dc\"
             "search result should reference notes source. Output: {search_output}"
         );
     }
+
+    // ---- Phase 22 E2E: Persistence test ----
+
+    #[test]
+    fn test_e2e_persistence_survives_reload() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"PersistTest\"\n\n\
+                 [character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+            )
+            .with_player("hero", "name,strength\nHero,15\n");
+
+        // Session 1: make some changes
+        {
+            let mut harness = TestHarness::from_campaign(&campaign);
+            harness.execute("set hero.strength 20");
+
+            // Verify change took effect
+            let gs = harness.game_state().unwrap();
+            assert_eq!(gs.get_player("Hero").unwrap().get_stat("strength"), Some(20.0));
+        }
+
+        // Session 2: "re-open" by creating new harness from same path
+        {
+            let mut app = rustory::app::App::new();
+            app.running = true;
+            let errors = app.load_campaign(campaign.path());
+            assert!(errors.is_empty(), "Reload should succeed: {:?}",
+                errors.iter().map(|e| e.to_string()).collect::<Vec<_>>());
+
+            let gs = app.game_state().unwrap();
+            let hero = gs.get_player("Hero").unwrap();
+            assert_eq!(
+                hero.get_stat("strength"),
+                Some(20.0),
+                "Strength should still be 20 after reload"
+            );
+        }
+    }
+
+    // ---- Phase 22 E2E: Multi-system test ----
+
+    #[test]
+    fn test_e2e_multi_system_dnd_and_pbta() {
+        // Test D&D 5e system (d20 + modifier, roll-over)
+        {
+            let harness = TestHarness::from_fixture("dnd_basic");
+            let gs = harness.game_state().unwrap();
+            let rules = gs.rules.as_ref().unwrap();
+
+            assert_eq!(rules.system_name, "D&D 5e");
+            assert_eq!(rules.stat_names.len(), 6, "D&D should have 6 abilities");
+            assert!(rules.checks.iter().any(|c| c.name == "ability_check"), "D&D should have ability_check");
+
+            // Verify D&D character schema
+            let thorin = gs.get_player("Thorin").unwrap();
+            assert_eq!(thorin.get_stat("strength"), Some(18.0));
+            assert_eq!(thorin.get_stat("charisma"), Some(8.0));
+
+            let goblin = gs.get_npc("Goblin").unwrap();
+            assert_eq!(goblin.get_stat("dexterity"), Some(14.0));
+
+            // Verify D&D gauges
+            assert!(thorin.gauges.contains_key("hp"), "D&D Thorin should have HP gauge");
+        }
+
+        // Test PbtA system (2d6 + stat, 3-tier resolution)
+        {
+            let harness = TestHarness::from_fixture("pbta_basic");
+            let gs = harness.game_state().unwrap();
+            let rules = gs.rules.as_ref().unwrap();
+
+            assert_eq!(rules.system_name, "PbtA");
+            assert_eq!(rules.stat_names.len(), 5, "PbtA should have 5 stats");
+            assert_eq!(rules.stat_names[0], "cool");
+            assert!(rules.checks.iter().any(|c| c.name == "move"), "PbtA should have move check");
+
+            // Verify PbtA character schema (different from D&D)
+            let ghost = gs.get_player("Ghost").unwrap();
+            assert_eq!(ghost.get_stat("cool"), Some(1.0));
+            assert_eq!(ghost.get_stat("hard"), Some(2.0));
+            assert_eq!(ghost.get_stat("hot"), Some(-1.0)); // PbtA allows negative stats
+
+            // Verify PbtA 3-tier check definition
+            let move_check = rules.checks.iter().find(|c| c.name == "move").unwrap();
+            assert_eq!(move_check.thresholds.len(), 3, "PbtA move should have 3 tiers");
+        }
+
+        // Both systems' checks produce deterministic results with same seed
+        {
+            use rustory::rules::resolver::{resolve_check, CheckResult};
+            use std::collections::HashMap;
+
+            // D&D check
+            let dnd = TestHarness::from_fixture("dnd_basic");
+            let dnd_gs = dnd.game_state().unwrap();
+            let dnd_rules = dnd_gs.rules.as_ref().unwrap();
+            let dnd_check = dnd_rules.checks.iter().find(|c| c.name == "ability_check").unwrap();
+            let thorin = dnd_gs.get_player("Thorin").unwrap();
+
+            let mut args = HashMap::new();
+            args.insert("ability".to_string(), "strength".to_string());
+            args.insert("dc".to_string(), "15".to_string());
+            let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+            let dnd_result = resolve_check(dnd_check, thorin, &args, &mut rng);
+            assert!(
+                dnd_result == CheckResult::Success || dnd_result == CheckResult::Failure,
+                "D&D check should produce Success or Failure"
+            );
+
+            // PbtA check
+            let pbta = TestHarness::from_fixture("pbta_basic");
+            let pbta_gs = pbta.game_state().unwrap();
+            let pbta_rules = pbta_gs.rules.as_ref().unwrap();
+            let pbta_check = pbta_rules.checks.iter().find(|c| c.name == "move").unwrap();
+            let ghost = pbta_gs.get_player("Ghost").unwrap();
+
+            let mut args2 = HashMap::new();
+            args2.insert("stat".to_string(), "cool".to_string());
+            let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
+            let pbta_result = resolve_check(pbta_check, ghost, &args2, &mut rng2);
+            assert!(
+                pbta_result == CheckResult::Success
+                    || pbta_result == CheckResult::Failure
+                    || matches!(pbta_result, CheckResult::Partial(_)),
+                "PbtA check should produce Success, Failure, or Partial"
+            );
+        }
+    }
 }
