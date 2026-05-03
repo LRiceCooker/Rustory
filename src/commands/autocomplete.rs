@@ -162,8 +162,15 @@ fn complete_spawn(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
         .collect()
 }
 
+/// Static list of `map list` subcommands.
+const MAP_LIST_SUBCOMMANDS: &[&str] = &["burgs", "cultures", "states"];
+
 /// Completer for `map` subcommands.
-/// For `map where <character>` and `map move <character> <location>`, completes character names.
+/// - `map where <character>`: character names
+/// - `map move <character> <location>`: character names then burg names
+/// - `map info/search/near <burg>`: burg names
+/// - `map route <from> <to>`: burg names for both args
+/// - `map list [burgs/states/cultures]`: static subcommand list
 fn complete_map(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
     // arg_index 0 = subcommand (where, move, info, etc.) — handled in Phase 25.4
     // arg_index 1+ depends on subcommand
@@ -194,8 +201,36 @@ fn complete_map(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
             if arg_index == 1 {
                 get_character_names(app, partial)
             } else if arg_index == 2 {
-                // Complete burg names from WorldMap
                 complete_burg_names(app, partial)
+            } else {
+                Vec::new()
+            }
+        }
+        Some("info") | Some("search") | Some("near") => {
+            // map info/search/near <burg> — arg_index 1 = burg name
+            if arg_index == 1 {
+                complete_burg_names(app, partial)
+            } else {
+                Vec::new()
+            }
+        }
+        Some("route") => {
+            // map route <from> <to> — arg_index 1 and 2 are both burg names
+            if arg_index == 1 || arg_index == 2 {
+                complete_burg_names(app, partial)
+            } else {
+                Vec::new()
+            }
+        }
+        Some("list") => {
+            // map list [burgs/states/cultures] — static subcommand list
+            if arg_index == 1 {
+                let lower_partial = partial.to_lowercase();
+                MAP_LIST_SUBCOMMANDS
+                    .iter()
+                    .filter(|s| s.starts_with(&lower_partial))
+                    .map(|s| s.to_string())
+                    .collect()
             } else {
                 Vec::new()
             }
@@ -502,19 +537,131 @@ mod tests {
     }
 
     #[test]
-    fn test_map_unknown_subcommand_returns_empty() {
+    fn test_map_arg_index_0_returns_empty() {
         let mut app = app_with_characters();
+        app.input = "map wh".to_string();
+        let results = complete_map(&app, 0, "wh");
+        assert!(results.is_empty());
+    }
+
+    /// Create an App with a WorldMap containing test burgs.
+    fn app_with_world_map() -> App {
+        let json = r##"{
+            "info": {"width": 800, "height": 600},
+            "pack": {
+                "burgs": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Thornwall", "x": 100.0, "y": 100.0, "population": 28.5, "state": 1, "culture": 1, "type": "City", "capital": 1},
+                    {"i": 2, "name": "Silverport", "x": 200.0, "y": 100.0, "population": 12.0, "state": 1, "culture": 1, "type": "Town"},
+                    {"i": 3, "name": "Thornvale", "x": 120.0, "y": 110.0, "population": 3.0, "state": 1}
+                ],
+                "states": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Kingdom of Light", "form": "Monarchy"}
+                ],
+                "cultures": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Elven", "type": "Lake"}
+                ],
+                "routes": []
+            }
+        }"##;
+        let world_map = crate::map::world::WorldMap::from_parsed(
+            crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+        );
+        let mut app = App::new();
+        app.world_map = Some(world_map);
+        app
+    }
+
+    #[test]
+    fn test_map_info_completes_burg_names() {
+        let mut app = app_with_world_map();
+        app.input = "map info thorn".to_string();
+        let results = complete_map(&app, 1, "thorn");
+        assert!(results.contains(&"thornwall".to_string()));
+        assert!(results.contains(&"thornvale".to_string()));
+        assert!(!results.contains(&"silverport".to_string()));
+    }
+
+    #[test]
+    fn test_map_search_completes_burg_names() {
+        let mut app = app_with_world_map();
+        app.input = "map search silver".to_string();
+        let results = complete_map(&app, 1, "silver");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "silverport");
+    }
+
+    #[test]
+    fn test_map_near_completes_burg_names() {
+        let mut app = app_with_world_map();
+        app.input = "map near thorn".to_string();
+        let results = complete_map(&app, 1, "thorn");
+        assert!(results.contains(&"thornwall".to_string()));
+        assert!(results.contains(&"thornvale".to_string()));
+    }
+
+    #[test]
+    fn test_map_route_completes_burg_names_arg1() {
+        let mut app = app_with_world_map();
+        app.input = "map route thorn".to_string();
+        let results = complete_map(&app, 1, "thorn");
+        assert!(results.contains(&"thornwall".to_string()));
+    }
+
+    #[test]
+    fn test_map_route_completes_burg_names_arg2() {
+        let mut app = app_with_world_map();
+        app.input = "map route thornwall silver".to_string();
+        let results = complete_map(&app, 2, "silver");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "silverport");
+    }
+
+    #[test]
+    fn test_map_list_completes_subcommands() {
+        let mut app = app_with_world_map();
+        app.input = "map list b".to_string();
+        let results = complete_map(&app, 1, "b");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "burgs");
+    }
+
+    #[test]
+    fn test_map_list_completes_all_subcommands_on_empty() {
+        let mut app = app_with_world_map();
+        app.input = "map list ".to_string();
+        let results = complete_map(&app, 1, "");
+        assert_eq!(results.len(), 3);
+        assert!(results.contains(&"burgs".to_string()));
+        assert!(results.contains(&"states".to_string()));
+        assert!(results.contains(&"cultures".to_string()));
+    }
+
+    #[test]
+    fn test_map_list_no_match_returns_empty() {
+        let mut app = app_with_world_map();
         app.input = "map list th".to_string();
         let results = complete_map(&app, 1, "th");
         assert!(results.is_empty());
     }
 
     #[test]
-    fn test_map_arg_index_0_returns_empty() {
-        let mut app = app_with_characters();
-        app.input = "map wh".to_string();
-        let results = complete_map(&app, 0, "wh");
+    fn test_map_info_no_world_map_returns_empty() {
+        let mut app = App::new();
+        app.input = "map info thorn".to_string();
+        let results = complete_map(&app, 1, "thorn");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_map_info_case_insensitive() {
+        let mut app = app_with_world_map();
+        app.input = "map info THORN".to_string();
+        let results = complete_map(&app, 1, "THORN");
+        assert!(results.contains(&"thornwall".to_string()));
+        assert!(results.contains(&"thornvale".to_string()));
     }
 
     // --- Sound completion tests ---
