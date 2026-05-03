@@ -91,12 +91,7 @@ pub fn load_encounters(dir: &Path) -> HashMap<String, EncounterTable> {
     let mut toml_files: Vec<_> = match fs::read_dir(dir) {
         Ok(entries) => entries
             .flatten()
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    == Some("toml")
-            })
+            .filter(|e| e.path().extension().and_then(|ext| ext.to_str()) == Some("toml"))
             .collect(),
         Err(_) => return tables,
     };

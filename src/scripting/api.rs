@@ -1808,11 +1808,31 @@ KTHXBYE",
         // Add schema for column validation
         gs.schema = Some(crate::rules::CampaignSchema {
             character_schema: crate::schema::csv_schema::CsvSchema::new(vec![
-                crate::schema::csv_schema::ColumnDef::new("name", crate::schema::csv_schema::ColumnType::String, true),
-                crate::schema::csv_schema::ColumnDef::new("strength", crate::schema::csv_schema::ColumnType::Number, true),
-                crate::schema::csv_schema::ColumnDef::new("dexterity", crate::schema::csv_schema::ColumnType::Number, true),
-                crate::schema::csv_schema::ColumnDef::new("hp_max", crate::schema::csv_schema::ColumnType::Number, true),
-                crate::schema::csv_schema::ColumnDef::new("ac", crate::schema::csv_schema::ColumnType::Number, true),
+                crate::schema::csv_schema::ColumnDef::new(
+                    "name",
+                    crate::schema::csv_schema::ColumnType::String,
+                    true,
+                ),
+                crate::schema::csv_schema::ColumnDef::new(
+                    "strength",
+                    crate::schema::csv_schema::ColumnType::Number,
+                    true,
+                ),
+                crate::schema::csv_schema::ColumnDef::new(
+                    "dexterity",
+                    crate::schema::csv_schema::ColumnType::Number,
+                    true,
+                ),
+                crate::schema::csv_schema::ColumnDef::new(
+                    "hp_max",
+                    crate::schema::csv_schema::ColumnType::Number,
+                    true,
+                ),
+                crate::schema::csv_schema::ColumnDef::new(
+                    "ac",
+                    crate::schema::csv_schema::ColumnType::Number,
+                    true,
+                ),
             ]),
             inventory_schema: crate::schema::csv_schema::CsvSchema::new(vec![]),
         });

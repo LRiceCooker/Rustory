@@ -1953,10 +1953,22 @@ success = \"result >= dc\"
 
         let campaign = TestCampaign::new()
             .with_system_toml(system_toml)
-            .with_player("thorin", "name,class,strength,hp_max,ac\nThorin,Fighter,18,52,18\n")
-            .with_npc("goblin", "name,class,strength,hp_max,ac\nGoblin,Monster,8,7,15\n")
-            .with_lore("goblin", "# Goblin\nA sneaky green creature that lurks in caves.\n")
-            .with_npc("orc", "name,class,strength,hp_max,ac\nOrc,Monster,16,15,13\n");
+            .with_player(
+                "thorin",
+                "name,class,strength,hp_max,ac\nThorin,Fighter,18,52,18\n",
+            )
+            .with_npc(
+                "goblin",
+                "name,class,strength,hp_max,ac\nGoblin,Monster,8,7,15\n",
+            )
+            .with_lore(
+                "goblin",
+                "# Goblin\nA sneaky green creature that lurks in caves.\n",
+            )
+            .with_npc(
+                "orc",
+                "name,class,strength,hp_max,ac\nOrc,Monster,16,15,13\n",
+            );
 
         let mut harness = TestHarness::from_campaign(&campaign);
 
@@ -2089,10 +2101,7 @@ success = \"result >= dc\"
             buffer_contains(&buf, "rustory/"),
             "Should show campaign prompt with name"
         );
-        assert!(
-            buffer_contains(&buf, " > "),
-            "Should show prompt separator"
-        );
+        assert!(buffer_contains(&buf, " > "), "Should show prompt separator");
 
         // 16. Verify persistence (files on disk)
         assert!(
@@ -2316,7 +2325,10 @@ npcs = []
         TestCampaign::new()
             .with_system_toml(encounter_system_toml())
             .with_npc("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
-            .with_npc("shopkeeper", "name,strength,hp_max,ac\nShopkeeper,10,12,10\n")
+            .with_npc(
+                "shopkeeper",
+                "name,strength,hp_max,ac\nShopkeeper,10,12,10\n",
+            )
             .with_encounter("forest", encounter_forest_toml())
     }
 
@@ -2544,13 +2556,19 @@ npcs = ["nonexistent_npc"]
         let campaign1 = TestCampaign::new()
             .with_system_toml(campaign_toml)
             .with_npc("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
-            .with_npc("shopkeeper", "name,strength,hp_max,ac\nShopkeeper,10,12,10\n")
+            .with_npc(
+                "shopkeeper",
+                "name,strength,hp_max,ac\nShopkeeper,10,12,10\n",
+            )
             .with_encounter("forest", forest_toml);
 
         let campaign2 = TestCampaign::new()
             .with_system_toml(campaign_toml)
             .with_npc("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
-            .with_npc("shopkeeper", "name,strength,hp_max,ac\nShopkeeper,10,12,10\n")
+            .with_npc(
+                "shopkeeper",
+                "name,strength,hp_max,ac\nShopkeeper,10,12,10\n",
+            )
             .with_encounter("forest", forest_toml);
 
         let mut app1 = rustory::app::App::with_rng(Box::new(StdRng::seed_from_u64(42)));
@@ -2599,8 +2617,7 @@ npcs = ["nonexistent_npc"]
 
     #[test]
     fn test_e2e_encounter_empty_tables() {
-        let campaign =
-            TestCampaign::new().with_system_toml("[system]\nname = \"NoEncounters\"\n");
+        let campaign = TestCampaign::new().with_system_toml("[system]\nname = \"NoEncounters\"\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
         harness.execute("encounter ls");

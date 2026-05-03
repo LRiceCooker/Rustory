@@ -255,10 +255,7 @@ impl App {
 
     /// Total character width of the prompt (for cursor positioning).
     pub fn prompt_len(&self) -> usize {
-        self.prompt_spans()
-            .iter()
-            .map(|s| s.content.len())
-            .sum()
+        self.prompt_spans().iter().map(|s| s.content.len()).sum()
     }
 
     /// Crop the source map image to match the current viewport and create a
@@ -675,8 +672,7 @@ impl App {
 
                 // List custom commands with docs from README.md
                 if !gs.custom_commands.is_empty() {
-                    let mut cmd_names: Vec<&String> =
-                        gs.custom_commands.keys().collect();
+                    let mut cmd_names: Vec<&String> = gs.custom_commands.keys().collect();
                     cmd_names.sort();
 
                     lines.push(StyledLine::new(String::new(), Style::default()));
@@ -693,10 +689,7 @@ impl App {
                         } else {
                             format!("  {name}")
                         };
-                        lines.push(StyledLine::new(
-                            line,
-                            Style::default().fg(Color::Green),
-                        ));
+                        lines.push(StyledLine::new(line, Style::default().fg(Color::Green)));
                     }
                 }
             }
@@ -1997,22 +1990,23 @@ impl App {
             .unwrap_or_default();
         let expected_refs: Vec<&str> = expected_columns.iter().map(|s| s.as_str()).collect();
 
-        let template_char =
-            match crate::game_state::loader::load_character_from_folder(&template_folder, &expected_refs)
-            {
-                Ok(c) => c,
-                Err(errs) => {
-                    let msg = errs
-                        .iter()
-                        .map(|e| e.message.clone())
-                        .collect::<Vec<_>>()
-                        .join("; ");
-                    self.apply_command_result(CommandResult::Error(format!(
-                        "Failed to load NPC template \"{folder_name}\": {msg}"
-                    )));
-                    return;
-                }
-            };
+        let template_char = match crate::game_state::loader::load_character_from_folder(
+            &template_folder,
+            &expected_refs,
+        ) {
+            Ok(c) => c,
+            Err(errs) => {
+                let msg = errs
+                    .iter()
+                    .map(|e| e.message.clone())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Failed to load NPC template \"{folder_name}\": {msg}"
+                )));
+                return;
+            }
+        };
 
         // Determine the NPC name: use custom name or auto-generate
         let npc_name = match custom_name {
@@ -2114,7 +2108,8 @@ impl App {
                 // List all encounter zones
                 if gs.encounter_tables.is_empty() {
                     self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                        "No encounter tables found. Add .toml files to npc/encounters/.".to_string(),
+                        "No encounter tables found. Add .toml files to npc/encounters/."
+                            .to_string(),
                         Style::default().fg(Color::Yellow),
                     )]));
                     return;
@@ -4195,7 +4190,10 @@ mod tests {
         );
         // Should show name only without a dash separator
         let zap_line = output_texts.iter().find(|t| t.contains("zap"));
-        assert!(zap_line.is_some(), "help should list zap command. Messages: {output_texts:?}");
+        assert!(
+            zap_line.is_some(),
+            "help should list zap command. Messages: {output_texts:?}"
+        );
         assert!(
             !zap_line.unwrap().contains("—"),
             "zap without docs should not have a dash. Line: {:?}",
@@ -4908,7 +4906,10 @@ mod tests {
 
         let initial_zoom = app.map_viewport.zoom;
         app.on_key(KeyEvent::from(KeyCode::Char('+')));
-        assert!(app.map_viewport.zoom > initial_zoom, "Should have zoomed in");
+        assert!(
+            app.map_viewport.zoom > initial_zoom,
+            "Should have zoomed in"
+        );
         assert!(
             app.map_image_protocol.is_some(),
             "Protocol should still exist after zoom"
@@ -6391,7 +6392,11 @@ mod tests {
         )
         .unwrap();
         app.load_campaign(&campaign);
-        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        let text: String = app
+            .prompt_spans()
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert_eq!(text, "rustory/my_quest > ");
     }
 
@@ -6408,7 +6413,11 @@ mod tests {
         .unwrap();
         app.load_campaign(&campaign);
         app.mode = Mode::Map;
-        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        let text: String = app
+            .prompt_spans()
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert_eq!(text, "rustory/my_quest [map] > ");
     }
 
@@ -6425,7 +6434,11 @@ mod tests {
         .unwrap();
         app.load_campaign(&campaign);
         app.mode = Mode::Combat;
-        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        let text: String = app
+            .prompt_spans()
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert_eq!(text, "rustory/my_quest [combat] > ");
     }
 
@@ -6433,7 +6446,11 @@ mod tests {
     fn test_prompt_no_campaign_map_mode() {
         let mut app = App::new();
         app.mode = Mode::Map;
-        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        let text: String = app
+            .prompt_spans()
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert_eq!(text, "rustory [map] > ");
     }
 
@@ -6474,7 +6491,11 @@ mod tests {
         .unwrap();
         app.load_campaign(&campaign);
         app.mode = Mode::Map;
-        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        let text: String = app
+            .prompt_spans()
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert_eq!(app.prompt_len(), text.len());
     }
 
