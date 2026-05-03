@@ -130,6 +130,9 @@ pub fn dispatch(
         mapping::VALIDATE => {
             CommandResult::Error("validate command must be handled by the app".to_string())
         }
+        mapping::DAMAGE | mapping::DAMAGE_ALIAS => {
+            CommandResult::Error("damage command must be handled by the app".to_string())
+        }
         mapping::COMBAT
         | mapping::INIT
         | mapping::NEXT

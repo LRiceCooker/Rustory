@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind};
 use rand::{Rng, RngCore};
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
@@ -102,6 +102,7 @@ pub struct App {
     pub persistence: Option<PersistenceLayer>,
     pub redo_stack: Vec<String>,
     pub initiative_tracker: Option<InitiativeTracker>,
+    pub current_target: Option<String>,
 }
 
 impl Default for App {
@@ -138,6 +139,7 @@ impl App {
             persistence: None,
             redo_stack: Vec::new(),
             initiative_tracker: None,
+            current_target: None,
         }
     }
 
@@ -320,6 +322,11 @@ impl App {
     fn handle_events(&mut self) -> color_eyre::Result<()> {
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
+            Event::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::ScrollUp => self.scroll_up(3),
+                MouseEventKind::ScrollDown => self.scroll_down(3),
+                _ => {}
+            },
             _ => {}
         }
         Ok(())
@@ -474,6 +481,10 @@ impl App {
         }
         if command == mapping::SPAWN {
             self.handle_spawn_command(args);
+            return;
+        }
+        if command == mapping::DAMAGE || command == mapping::DAMAGE_ALIAS {
+            self.handle_damage_command(args);
             return;
         }
         if command == mapping::ENCOUNTER {
@@ -1870,6 +1881,104 @@ impl App {
         }
     }
 
+    fn handle_damage_command(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: damage <character> <amount> (e.g. damage thorin 15)".to_string(),
+            ));
+            return;
+        }
+
+        if self.game_state.is_none() {
+            self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
+            return;
+        }
+
+        // Parse args: either "amount" (use current target) or "character amount"
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+
+        let (char_name, amount_str) = if parts.len() == 1 {
+            // Single arg — must be amount, use current target
+            match &self.current_target {
+                Some(target) => (target.clone(), parts[0]),
+                None => {
+                    self.apply_command_result(CommandResult::Error(
+                        "No target set. Use: damage <character> <amount>".to_string(),
+                    ));
+                    return;
+                }
+            }
+        } else {
+            (parts[0].to_string(), parts[1])
+        };
+
+        let amount: f64 = match amount_str.parse() {
+            Ok(v) if v >= 0.0 => v,
+            _ => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Invalid damage amount \"{amount_str}\". Must be a non-negative number."
+                )));
+                return;
+            }
+        };
+
+        let gs = self.game_state.as_mut().unwrap();
+        let name_lower = char_name.to_lowercase();
+
+        // Find character (player or NPC)
+        let (character, is_player) = {
+            if let Some(ch) = gs
+                .players
+                .iter_mut()
+                .find(|c| c.name.to_lowercase() == name_lower)
+            {
+                (ch, true)
+            } else if let Some(ch) = gs
+                .npcs
+                .iter_mut()
+                .find(|c| c.name.to_lowercase() == name_lower)
+            {
+                (ch, false)
+            } else {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Character \"{char_name}\" not found."
+                )));
+                return;
+            }
+        };
+
+        // Find the first gauge (typically "hp") — use "hp" by default
+        let gauge_name = "hp".to_string();
+        if !character.gauges.contains_key(&gauge_name) {
+            let ch_name = character.name.clone();
+            self.apply_command_result(CommandResult::Error(format!(
+                "Character \"{ch_name}\" has no HP gauge."
+            )));
+            return;
+        }
+
+        let gauge = character.gauges.get_mut(&gauge_name).unwrap();
+        let old_hp = gauge.current;
+        gauge.damage(amount);
+        let new_hp = gauge.current;
+        let ch_name = character.name.clone();
+
+        // Persist
+        if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &gs.schema) {
+            let _ = pl.persist_character(
+                character,
+                is_player,
+                schema,
+                &format!("{ch_name} takes {amount} damage (HP: {old_hp} -> {new_hp})"),
+            );
+        }
+
+        self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+            format!("{ch_name}: {old_hp} → {new_hp} HP"),
+            Style::default().fg(Color::Red),
+        )]));
+    }
+
     fn handle_list_command(&mut self, args: &str) {
         let gs = match &self.game_state {
             Some(gs) => gs,
@@ -2678,6 +2787,8 @@ impl App {
                 return;
             }
         }
+
+        self.current_target = Some(args.to_string());
 
         self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
             format!("Target set to: {args}"),
@@ -5005,7 +5116,7 @@ mod tests {
         // Render in map mode with image protocol
         let buf = render_app_to_buffer(&mut app, 80, 25);
         let content = buffer_content(&buf);
-        // Should render something — the image halfblocks + canvas overlay
+        // Should render something — the image + metadata sidebar
         let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
         assert!(
             non_space > 0,
@@ -7329,5 +7440,170 @@ mod tests {
             output.contains("No session notes"),
             "Should show no notes. Got: {output}"
         );
+    }
+
+    // --- Damage command tests ---
+
+    fn setup_damage_campaign(dir: &Path) -> PathBuf {
+        let campaign = dir.join("damage_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"hp_max\"]\n\n[resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign.join("players/thorin/sheet.csv"),
+            "name,hp_max\nThorin,52\n",
+        )
+        .unwrap();
+        campaign
+    }
+
+    #[test]
+    fn test_damage_reduces_hp() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_damage_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("damage thorin 15");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("37"),
+            "Should show HP reduced to 37. Got: {output}"
+        );
+        assert!(
+            output.contains("52"),
+            "Should show old HP 52. Got: {output}"
+        );
+
+        // Verify actual gauge value
+        let hp = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap();
+        assert_eq!(hp.current, 37.0);
+    }
+
+    #[test]
+    fn test_damage_with_target() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_damage_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // Set current target
+        app.current_target = Some("Thorin".to_string());
+
+        // Damage with just amount (uses current target)
+        app.dispatch_command("damage 15");
+
+        let hp = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap();
+        assert_eq!(hp.current, 37.0);
+    }
+
+    #[test]
+    fn test_damage_below_zero_clamps() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_damage_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("damage thorin 999");
+
+        let hp = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap();
+        assert_eq!(hp.current, 0.0);
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("0"),
+            "Should show HP clamped to 0. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_damage_no_campaign_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.messages.clear();
+
+        app.dispatch_command("damage thorin 10");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No campaign loaded"),
+            "Should show no campaign error. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_damage_alias_dmg() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_damage_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("dmg thorin 10");
+
+        let hp = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap();
+        assert_eq!(hp.current, 42.0);
     }
 }
