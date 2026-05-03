@@ -2694,4 +2694,160 @@ npcs = ["nonexistent_npc"]
             "Should report unknown subcommand. Output: {all_output}"
         );
     }
+
+    // ---- Phase 24.0c: ls/alias E2E tests ----
+
+    #[test]
+    fn test_e2e_ls_sound_shows_sound_library() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"LsSoundTest\"\n")
+            .with_sound_file("ambiance/tavern.mp3", b"fake-audio")
+            .with_sound_file("sfx/sword.wav", b"fake-audio");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("ls sound");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Sound library"),
+            "ls sound should show library header. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("ambiance"),
+            "ls sound should list ambiance dir. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("sfx"),
+            "ls sound should list sfx dir. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_ls_encounters_shows_zones() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"LsEncTest\"\n")
+            .with_encounter(
+                "forest",
+                "[zone]\nname = \"Dark Forest\"\ndescription = \"A spooky forest\"\n\n[[entries]]\nname = \"Wolf Pack\"\nweight = 50\n",
+            )
+            .with_encounter(
+                "dungeon",
+                "[zone]\nname = \"Deep Dungeon\"\ndescription = \"Underground halls\"\n\n[[entries]]\nname = \"Skeleton\"\nweight = 40\n",
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("ls encounters");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("forest"),
+            "ls encounters should list forest zone. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("dungeon"),
+            "ls encounters should list dungeon zone. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_ls_commands_shows_command_list() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"LsCmdTest\"\n")
+            .with_lol_command("smite", "HAI 1.2\nKTHXBYE\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("ls commands");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Available commands"),
+            "ls commands should show header. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("roll"),
+            "ls commands should list roll. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("help"),
+            "ls commands should list help. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("smite"),
+            "ls commands should list custom command smite. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_r_alias_rolls_dice() {
+        let mut harness = TestHarness::with_seed(42);
+        harness.execute("r 1d20");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // r should resolve to roll — output should contain dice result, not an error
+        assert!(
+            !all_output.contains("Unknown command"),
+            "r 1d20 should not be unknown. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("result"),
+            "r 1d20 should show a roll result. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_s_alias_shows_character() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"AliasTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+            )
+            .with_player("thorin", "name,strength\nThorin,18\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("s thorin");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // s should resolve to show — output should contain character info
+        assert!(
+            !all_output.contains("Unknown command"),
+            "s thorin should not be unknown. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Thorin"),
+            "s thorin should show Thorin's sheet. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("18"),
+            "s thorin should show strength value. Output: {all_output}"
+        );
+    }
 }
