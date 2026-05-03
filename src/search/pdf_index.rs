@@ -106,11 +106,40 @@ impl SearchIndex {
         }
     }
 
-    /// Build the full index from a campaign path: PDFs + markdown.
+    /// Index all markdown files from the campaign's notes/ directory.
+    pub fn index_notes(&mut self, campaign_path: &Path) {
+        let notes_dir = campaign_path.join("notes");
+        let entries = match std::fs::read_dir(&notes_dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    if !text.trim().is_empty() {
+                        let relative = path
+                            .strip_prefix(campaign_path)
+                            .unwrap_or(&path)
+                            .to_string_lossy()
+                            .to_string();
+                        self.documents.push(IndexedDocument {
+                            source: relative,
+                            text,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Build the full index from a campaign path: PDFs + markdown + notes.
     pub fn build(campaign_path: &Path) -> Self {
         let mut index = Self::new();
         index.index_pdfs(campaign_path);
         index.index_markdown(campaign_path);
+        index.index_notes(campaign_path);
         index
     }
 
@@ -532,5 +561,58 @@ mod tests {
         let sources: Vec<&str> = index.documents.iter().map(|d| d.source.as_str()).collect();
         assert!(sources.iter().any(|s| s.contains("rules.pdf")));
         assert!(sources.iter().any(|s| s.contains("lore.md")));
+    }
+
+    #[test]
+    fn test_index_notes_adds_session_notes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let notes_dir = dir.path().join("notes");
+        std::fs::create_dir_all(&notes_dir).unwrap();
+        std::fs::write(
+            notes_dir.join("2026-05-01.md"),
+            "## 14:30\nThe party entered the cave.\n\n## 15:00\nThey found treasure.\n",
+        ).unwrap();
+        std::fs::write(
+            notes_dir.join("2026-05-02.md"),
+            "## 10:00\nCombat with the dragon.\n",
+        ).unwrap();
+
+        let mut index = SearchIndex::new();
+        index.index_notes(dir.path());
+
+        assert_eq!(index.documents.len(), 2, "Should index 2 note files");
+
+        let results = index.search("cave", 5);
+        assert!(!results.is_empty(), "Should find 'cave' in notes");
+        assert!(results[0].source.contains("2026-05-01.md"), "Source should be the correct note file");
+    }
+
+    #[test]
+    fn test_build_includes_notes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let notes_dir = dir.path().join("notes");
+        std::fs::create_dir_all(&notes_dir).unwrap();
+        std::fs::write(
+            notes_dir.join("2026-05-01.md"),
+            "## 14:30\nThe waterfall conceals a hidden door.\n",
+        ).unwrap();
+
+        // Also add a lore file to verify both are indexed
+        let npc_dir = dir.path().join("npc").join("goblin");
+        std::fs::create_dir_all(&npc_dir).unwrap();
+        std::fs::write(
+            npc_dir.join("lore.md"),
+            "The Goblin King rules from his dark throne.\n",
+        ).unwrap();
+
+        let index = SearchIndex::build(dir.path());
+        assert!(index.documents.len() >= 2, "Should have at least note + lore");
+
+        // Search should find content from both sources
+        let results = index.search("waterfall", 5);
+        assert!(!results.is_empty(), "Should find 'waterfall' in notes");
+
+        let results = index.search("goblin king", 5);
+        assert!(!results.is_empty(), "Should find 'goblin king' in lore");
     }
 }
