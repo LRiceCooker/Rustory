@@ -8,7 +8,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use ratatui::DefaultTerminal;
 
-use crate::audio::library::SoundLibrary;
+use crate::audio::library::{FuzzyResult, SoundLibrary};
 use crate::audio::player::AudioPlayer;
 use crate::combat::initiative::InitiativeTracker;
 use crate::commands::dispatcher::{self, CommandResult, StyledLine};
@@ -484,6 +484,10 @@ impl App {
             self.handle_sound_command(args);
             return;
         }
+        if command == mapping::SOUND_PLAY_ALIAS {
+            self.sound_play(args);
+            return;
+        }
         if command == mapping::VALIDATE {
             self.handle_validate_command(args);
             return;
@@ -608,7 +612,9 @@ impl App {
 
         match cmd {
             SoundCommand::Play(filename) => {
-                if let Some(full_path) = self.sound_library.resolve(&filename) {
+                if let FuzzyResult::Found(full_path, _) =
+                    self.sound_library.resolve_fuzzy(&filename)
+                {
                     if let Err(e) = player.play(&full_path) {
                         self.messages.push(Message {
                             text: format!("Sound error: {e}"),
@@ -618,7 +624,9 @@ impl App {
                 }
             }
             SoundCommand::PlayLoop(filename) => {
-                if let Some(full_path) = self.sound_library.resolve(&filename) {
+                if let FuzzyResult::Found(full_path, _) =
+                    self.sound_library.resolve_fuzzy(&filename)
+                {
                     if let Err(e) = player.play_loop(&full_path) {
                         self.messages.push(Message {
                             text: format!("Sound error: {e}"),
@@ -683,7 +691,7 @@ impl App {
             StyledLine::plain("  history  — show recent state changes (e.g. history 5)"),
             StyledLine::plain("  undo     — revert the last state change"),
             StyledLine::plain("  redo     — re-apply the last undone change"),
-            StyledLine::plain("  sound    — play audio (e.g. sound play ambiance/tavern.mp3)"),
+            StyledLine::plain("  sound    — play audio (e.g. sound play tavern, or just: play tavern)"),
             StyledLine::plain(
                 "  spawn     — duplicate NPC folder as new NPC (e.g. spawn goblin_king Guard)",
             ),
@@ -1411,14 +1419,26 @@ impl App {
     fn sound_play(&mut self, args: &str) {
         if args.is_empty() {
             self.apply_command_result(CommandResult::Error(
-                "Usage: sound play <path> (e.g. sound play ambiance/tavern.mp3)".to_string(),
+                "Usage: sound play <path> (e.g. sound play ambiance/tavern.mp3 or play tavern)"
+                    .to_string(),
             ));
             return;
         }
 
-        let full_path = match self.sound_library.resolve(args) {
-            Some(p) => p,
-            None => {
+        let (full_path, display_path) = match self.sound_library.resolve_fuzzy(args) {
+            FuzzyResult::Found(full, rel) => (full, rel),
+            FuzzyResult::Ambiguous(matches) => {
+                let mut lines = vec![StyledLine::new(
+                    format!("Multiple matches for \"{args}\". Be more specific:"),
+                    Style::default().fg(Color::Yellow),
+                )];
+                for m in &matches {
+                    lines.push(StyledLine::plain(format!("  {m}")));
+                }
+                self.apply_command_result(CommandResult::Output(lines));
+                return;
+            }
+            FuzzyResult::NotFound => {
                 self.apply_command_result(CommandResult::Error(format!(
                     "Audio file \"{args}\" not found in sound library."
                 )));
@@ -1439,13 +1459,13 @@ impl App {
         match player.play(&full_path) {
             Ok(()) => {
                 self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                    format!("Playing: {args}"),
+                    format!("Playing: {display_path}"),
                     Style::default().fg(Color::Green),
                 )]));
             }
             Err(e) => {
                 self.apply_command_result(CommandResult::Error(format!(
-                    "Failed to play \"{args}\": {e}"
+                    "Failed to play \"{display_path}\": {e}"
                 )));
             }
         }
@@ -1459,9 +1479,20 @@ impl App {
             return;
         }
 
-        let full_path = match self.sound_library.resolve(args) {
-            Some(p) => p,
-            None => {
+        let (full_path, display_path) = match self.sound_library.resolve_fuzzy(args) {
+            FuzzyResult::Found(full, rel) => (full, rel),
+            FuzzyResult::Ambiguous(matches) => {
+                let mut lines = vec![StyledLine::new(
+                    format!("Multiple matches for \"{args}\". Be more specific:"),
+                    Style::default().fg(Color::Yellow),
+                )];
+                for m in &matches {
+                    lines.push(StyledLine::plain(format!("  {m}")));
+                }
+                self.apply_command_result(CommandResult::Output(lines));
+                return;
+            }
+            FuzzyResult::NotFound => {
                 self.apply_command_result(CommandResult::Error(format!(
                     "Audio file \"{args}\" not found in sound library."
                 )));
@@ -1482,13 +1513,13 @@ impl App {
         match player.play_loop(&full_path) {
             Ok(()) => {
                 self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                    format!("Looping: {args}"),
+                    format!("Looping: {display_path}"),
                     Style::default().fg(Color::Green),
                 )]));
             }
             Err(e) => {
                 self.apply_command_result(CommandResult::Error(format!(
-                    "Failed to loop \"{args}\": {e}"
+                    "Failed to loop \"{display_path}\": {e}"
                 )));
             }
         }
@@ -5941,6 +5972,113 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_sound_play_fuzzy_match() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // "tavern" should fuzzy-match "ambiance/tavern.mp3"
+        app.dispatch_command("sound play tavern");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Should resolve to the correct path (play may fail on fake audio data)
+        assert!(
+            output.contains("ambiance/tavern.mp3"),
+            "Fuzzy match should resolve tavern to ambiance/tavern.mp3. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_sound_play_fuzzy_ambiguous() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // "t" matches tavern.mp3 and theme.flac (at least)
+        app.dispatch_command("sound play t");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Multiple matches"),
+            "Should report multiple matches. Got: {output}"
+        );
+        assert!(
+            output.contains("tavern.mp3"),
+            "Should list tavern.mp3 as option. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_sound_play_alias() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // "play tavern" should work as alias for "sound play tavern"
+        app.dispatch_command("play tavern");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Should resolve to the correct path via alias + fuzzy match
+        assert!(
+            output.contains("ambiance/tavern.mp3"),
+            "play alias should fuzzy-match tavern. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_sound_play_exact_path_still_works() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // Exact path should still resolve directly
+        app.dispatch_command("sound play ambiance/tavern.mp3");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Should resolve to the correct path (play may fail on fake audio data)
+        assert!(
+            output.contains("ambiance/tavern.mp3"),
+            "Exact path should still work. Got: {output}"
+        );
     }
 
     #[test]

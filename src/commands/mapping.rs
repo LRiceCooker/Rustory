@@ -28,14 +28,15 @@ pub const REDO: &str = "redo";
 pub const SET: &str = "set";
 pub const SHOW: &str = "show";
 pub const SOUND: &str = "sound";
+pub const SOUND_PLAY_ALIAS: &str = "play";
 pub const SPAWN: &str = "spawn";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
 pub const WHERE: &str = "where";
 pub const WHO: &str = "who";
 
-pub const COMMANDS: [&str; 34] = [
+pub const COMMANDS: [&str; 35] = [
     CALC, CAT, CLEAR, COMBAT, DAMAGE, DAMAGE_ALIAS, ENCOUNTER, GIVE, HEAL, HEAL_ALIAS, HELP,
     HISTORY, INIT, LIST, LOAD, MAP, NEW, NEXT, NOTE, PREV, QUIT, REDO, ROLL, SEARCH, SET, SHOW,
-    SOUND, SPAWN, STATUS, TARGET, UNDO, VALIDATE, WHERE, WHO,
+    SOUND, SOUND_PLAY_ALIAS, SPAWN, STATUS, TARGET, UNDO, VALIDATE, WHERE, WHO,
 ];

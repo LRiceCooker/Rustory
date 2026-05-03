@@ -1,5 +1,16 @@
 use std::path::{Path, PathBuf};
 
+/// Result of a fuzzy sound file resolution.
+#[derive(Debug)]
+pub enum FuzzyResult {
+    /// Exactly one match found: (full filesystem path, relative display path).
+    Found(PathBuf, String),
+    /// Multiple matches — user must be more specific.
+    Ambiguous(Vec<String>),
+    /// No match found.
+    NotFound,
+}
+
 /// Supported audio file extensions.
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "wav", "ogg", "flac"];
 
@@ -116,6 +127,35 @@ impl SoundLibrary {
             Some(full)
         } else {
             None
+        }
+    }
+
+    /// Try to resolve a sound file by exact path first, then by fuzzy filename match.
+    /// Returns `Ok(path)` if exactly one match, `Err(matches)` if ambiguous (multiple matches),
+    /// or `Ok(None)` wrapped as empty vec if no match.
+    pub fn resolve_fuzzy(&self, query: &str) -> FuzzyResult {
+        // 1. Try exact path resolution first
+        if let Some(full_path) = self.resolve(query) {
+            return FuzzyResult::Found(full_path, query.to_string());
+        }
+
+        // 2. Fall back to case-insensitive substring search on filenames
+        let matches: Vec<&SoundEntry> = self.search(query);
+
+        match matches.len() {
+            0 => FuzzyResult::NotFound,
+            1 => {
+                let entry = matches[0];
+                // resolve using the entry's relative path
+                match self.resolve(&entry.path) {
+                    Some(full_path) => FuzzyResult::Found(full_path, entry.path.clone()),
+                    None => FuzzyResult::NotFound,
+                }
+            }
+            _ => {
+                let paths: Vec<String> = matches.iter().map(|e| e.path.clone()).collect();
+                FuzzyResult::Ambiguous(paths)
+            }
         }
     }
 
@@ -352,6 +392,73 @@ mod tests {
                 last_dir < first_file,
                 "Directories should sort before files"
             );
+        }
+    }
+
+    #[test]
+    fn test_resolve_fuzzy_exact_path() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        match lib.resolve_fuzzy("ambiance/tavern.mp3") {
+            FuzzyResult::Found(full, rel) => {
+                assert!(full.ends_with("ambiance/tavern.mp3"));
+                assert_eq!(rel, "ambiance/tavern.mp3");
+            }
+            other => panic!("Expected Found, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_fuzzy_filename_match() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        // "tavern" should find "ambiance/tavern.mp3"
+        match lib.resolve_fuzzy("tavern") {
+            FuzzyResult::Found(full, rel) => {
+                assert!(full.ends_with("ambiance/tavern.mp3"));
+                assert_eq!(rel, "ambiance/tavern.mp3");
+            }
+            other => panic!("Expected Found, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_fuzzy_case_insensitive() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        match lib.resolve_fuzzy("BATTLE") {
+            FuzzyResult::Found(_, rel) => {
+                assert_eq!(rel, "combat/battle.wav");
+            }
+            other => panic!("Expected Found, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_fuzzy_ambiguous() {
+        let dir = create_test_sound_dir();
+        // Add a second file that matches "t" — both tavern.mp3 and theme.flac match
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        match lib.resolve_fuzzy("t") {
+            FuzzyResult::Ambiguous(matches) => {
+                assert!(matches.len() >= 2, "Expected at least 2 matches, got {matches:?}");
+            }
+            other => panic!("Expected Ambiguous, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_fuzzy_not_found() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        match lib.resolve_fuzzy("nonexistent") {
+            FuzzyResult::NotFound => {}
+            other => panic!("Expected NotFound, got {other:?}"),
         }
     }
 }
