@@ -2793,6 +2793,22 @@ impl App {
                             format!("Spawned: {}", spawned_names.join(", ")),
                             Style::default().fg(Color::Green),
                         ));
+
+                        // Auto-add spawned NPCs to initiative if in combat mode
+                        if self.mode == Mode::Combat {
+                            if let Some(tracker) = &mut self.initiative_tracker {
+                                for name in &spawned_names {
+                                    tracker.add(name.clone(), 0.0);
+                                }
+                                lines.push(StyledLine::new(
+                                    format!(
+                                        "Added to initiative: {}",
+                                        spawned_names.join(", ")
+                                    ),
+                                    Style::default().fg(Color::Yellow),
+                                ));
+                            }
+                        }
                     }
                 }
 
@@ -2909,11 +2925,37 @@ impl App {
                     return;
                 }
                 self.mode = Mode::Combat;
-                self.initiative_tracker = Some(InitiativeTracker::new());
-                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                    "Combat started. Use 'init add <name> <value>' to add combatants.".to_string(),
+                let mut tracker = InitiativeTracker::new();
+
+                // Auto-add all loaded players to initiative with value 0
+                let player_names: Vec<String> = self
+                    .game_state
+                    .as_ref()
+                    .map(|gs| gs.players.iter().map(|p| p.name.clone()).collect())
+                    .unwrap_or_default();
+                for name in &player_names {
+                    tracker.add(name.clone(), 0.0);
+                }
+
+                self.initiative_tracker = Some(tracker);
+
+                let mut lines = vec![StyledLine::new(
+                    "Combat started.".to_string(),
                     Style::default().fg(Color::Green),
-                )]));
+                )];
+                if !player_names.is_empty() {
+                    lines.push(StyledLine::new(
+                        format!(
+                            "Added to initiative: {}",
+                            player_names.join(", ")
+                        ),
+                        Style::default().fg(Color::Green),
+                    ));
+                }
+                lines.push(StyledLine::plain(
+                    "Use 'init roll' to roll initiative for everyone.".to_string(),
+                ));
+                self.apply_command_result(CommandResult::Output(lines));
             }
             "end" => {
                 if self.mode != Mode::Combat {
@@ -3063,6 +3105,9 @@ impl App {
                 return;
             }
         };
+
+        // Clear existing entries — init roll replaces the current order
+        tracker.clear();
 
         let mut lines = Vec::new();
         for name in &names {
@@ -9076,6 +9121,143 @@ mod tests {
         assert!(
             output.contains("Some plain text notes"),
             "Should still display file content. Got: {output}"
+        );
+    }
+
+    // ---- Combat start auto-adds players tests ----
+
+    #[test]
+    fn test_combat_start_adds_players_to_initiative() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("combat_auto_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"hp_max\"]\n\n[resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign.join("players/thorin/sheet.csv"),
+            "name,hp_max\nThorin,52\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/elara")).unwrap();
+        std::fs::write(
+            campaign.join("players/elara/sheet.csv"),
+            "name,hp_max\nElara,38\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("combat start");
+
+        // Tracker should exist and contain both players
+        let tracker = app.initiative_tracker.as_ref().unwrap();
+        assert_eq!(tracker.len(), 2, "Should have 2 combatants (both players)");
+
+        let names: Vec<&str> = tracker.all().iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"Thorin"), "Thorin should be in initiative");
+        assert!(names.contains(&"Elara"), "Elara should be in initiative");
+
+        // All should have initiative 0
+        for combatant in tracker.all() {
+            assert_eq!(
+                combatant.initiative, 0.0,
+                "{} should have initiative 0",
+                combatant.name
+            );
+        }
+
+        // Output should mention the added players
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Added to initiative"),
+            "Should mention players added. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_encounter_roll_adds_npcs_to_initiative_during_combat() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("encounter_combat_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"hp_max\"]\n\n[resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign.join("players/thorin/sheet.csv"),
+            "name,hp_max\nThorin,52\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("npc/goblin")).unwrap();
+        std::fs::write(
+            campaign.join("npc/goblin/sheet.csv"),
+            "name,hp_max\nGoblin,7\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("npc/encounters")).unwrap();
+        std::fs::write(
+            campaign.join("npc/encounters/forest.toml"),
+            "[zone]\nname = \"Forest\"\n\n[[entries]]\nname = \"Goblin Patrol\"\nweight = 100\nnpcs = [\"goblin\", \"goblin\"]\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // Start combat first (auto-adds Thorin)
+        app.dispatch_command("combat start");
+        let tracker = app.initiative_tracker.as_ref().unwrap();
+        assert_eq!(tracker.len(), 1, "Should have 1 player in initiative");
+        app.messages.clear();
+
+        // Roll encounter — should spawn 2 goblins and add them to initiative
+        app.dispatch_command("encounter roll forest");
+
+        let tracker = app.initiative_tracker.as_ref().unwrap();
+        assert_eq!(
+            tracker.len(),
+            3,
+            "Should have 3 combatants (1 player + 2 spawned goblins)"
+        );
+
+        let names: Vec<&str> = tracker.all().iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"Thorin"), "Thorin should be in initiative");
+        assert!(
+            names.contains(&"Goblin #1"),
+            "Goblin #1 should be in initiative"
+        );
+        assert!(
+            names.contains(&"Goblin #2"),
+            "Goblin #2 should be in initiative"
+        );
+
+        // Output should mention NPCs added to initiative
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Added to initiative"),
+            "Should mention NPCs added to initiative. Got: {output}"
         );
     }
 }

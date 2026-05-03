@@ -115,6 +115,12 @@ impl InitiativeTracker {
     pub fn len(&self) -> usize {
         self.combatants.len()
     }
+
+    /// Clear all combatants.
+    pub fn clear(&mut self) {
+        self.combatants.clear();
+        self.current_index = 0;
+    }
 }
 
 #[cfg(test)]
