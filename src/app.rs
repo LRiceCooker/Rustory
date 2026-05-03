@@ -704,7 +704,7 @@ impl App {
                 "  spawn     — duplicate NPC folder as new NPC (e.g. spawn goblin_king Guard)",
             ),
             StyledLine::plain(
-                "  encounter — encounter tables (e.g. encounter ls, encounter roll forest)",
+                "  encounter — encounter tables (e.g. encounter show forest, encounter roll forest)",
             ),
             StyledLine::plain("  who      — player dashboard (HP, conditions, location)"),
             StyledLine::plain("  where    — show all character map locations"),
@@ -1381,7 +1381,7 @@ impl App {
             "search" => self.sound_search(sub_args),
             _ => {
                 self.apply_command_result(CommandResult::Error(format!(
-                    "Unknown sound subcommand \"{subcmd}\". Try: list, play, loop, stop, pause, resume, volume, status, search"
+                    "Unknown sound subcommand \"{subcmd}\". Try: play, loop, stop, pause, resume, volume, status, search"
                 )));
             }
         }
@@ -2801,7 +2801,7 @@ impl App {
                     Some(t) => t,
                     None => {
                         self.apply_command_result(CommandResult::Error(format!(
-                            "Encounter zone \"{sub_args}\" not found. Use 'encounter ls' to see available zones."
+                            "Encounter zone \"{sub_args}\" not found. Use 'ls encounters' to see available zones."
                         )));
                         return;
                     }
@@ -2853,7 +2853,7 @@ impl App {
                     Some(t) => t.clone(),
                     None => {
                         self.apply_command_result(CommandResult::Error(format!(
-                            "Encounter zone \"{sub_args}\" not found. Use 'encounter ls' to see available zones."
+                            "Encounter zone \"{sub_args}\" not found. Use 'ls encounters' to see available zones."
                         )));
                         return;
                     }
@@ -2921,7 +2921,7 @@ impl App {
             }
             other => {
                 self.apply_command_result(CommandResult::Error(format!(
-                    "Unknown subcommand \"{other}\". Try: encounter ls, encounter show <zone>, encounter roll <zone>"
+                    "Unknown subcommand \"{other}\". Try: encounter show <zone>, encounter roll <zone>"
                 )));
             }
         }
@@ -9614,6 +9614,148 @@ weight = 1
         assert!(
             output.contains("Added to initiative"),
             "Should mention NPCs added to initiative. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_sound_list_hidden_alias_still_works() {
+        let dir = create_campaign_with_sound();
+        let campaign = dir.path().join("sound_test");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("sound list");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("tavern.mp3") || output.contains("ambiance"),
+            "sound list should still work as hidden alias. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_encounter_ls_hidden_alias_still_works() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("enc_alias_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("npc/encounters")).unwrap();
+        std::fs::write(
+            campaign.join("npc/encounters/forest.toml"),
+            "[zone]\nname = \"Forest\"\ndescription = \"Dark woods\"\n\n[[entries]]\nname = \"Wolf Pack\"\nweight = 50\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("encounter ls");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Forest") || output.contains("forest"),
+            "encounter ls should still work as hidden alias. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_help_text_does_not_mention_encounter_ls() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("help");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !output.contains("encounter ls"),
+            "Help text should not mention 'encounter ls'. Got: {output}"
+        );
+        assert!(
+            output.contains("encounter show"),
+            "Help text should mention 'encounter show'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_encounter_error_references_ls_encounters() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("enc_err_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\"]\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("encounter show nonexistent");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("ls encounters"),
+            "Error should reference 'ls encounters'. Got: {output}"
+        );
+        assert!(
+            !output.contains("encounter ls"),
+            "Error should not reference 'encounter ls'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_sound_error_does_not_list_list_subcommand() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("sound foobar");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Try: play"),
+            "Error should list play as first suggestion. Got: {output}"
+        );
+        assert!(
+            !output.contains("Try: list"),
+            "Error should not list 'list' as suggestion. Got: {output}"
         );
     }
 }
