@@ -695,7 +695,7 @@ impl App {
             StyledLine::plain("  clear    — clear the output history"),
             StyledLine::plain("  show     — display character sheet (e.g. show thorin)"),
             StyledLine::plain("  set      — set a character field (e.g. set thorin.hp 35)"),
-            StyledLine::plain("  ls       — list players or npcs (e.g. ls players)"),
+            StyledLine::plain("  ls       — list things (e.g. ls players, ls sound, ls encounters)"),
             StyledLine::plain("  history  — show recent state changes (e.g. history 5)"),
             StyledLine::plain("  undo     — revert the last state change"),
             StyledLine::plain("  redo     — re-apply the last undone change"),
@@ -2435,9 +2435,35 @@ impl App {
         if list_type.is_empty() {
             self.apply_command_result(CommandResult::Output(vec![
                 StyledLine::plain("Usage: ls <subcommand>"),
-                StyledLine::plain("  ls players — list player characters"),
-                StyledLine::plain("  ls npc     — list NPCs"),
+                StyledLine::plain("  ls players    — list player characters"),
+                StyledLine::plain("  ls npc        — list NPCs"),
+                StyledLine::plain("  ls sound      — list sound library"),
+                StyledLine::plain("  ls encounters — list encounter zones"),
+                StyledLine::plain("  ls commands   — list available commands"),
             ]));
+            return;
+        }
+
+        // Handle "sound" and "sound/<subfolder>" variants
+        if list_type == "sound" {
+            self.sound_list(None);
+            return;
+        }
+        if let Some(subfolder) = list_type.strip_prefix("sound/") {
+            if subfolder.is_empty() {
+                self.sound_list(None);
+            } else {
+                self.sound_list(Some(subfolder));
+            }
+            return;
+        }
+        if list_type.starts_with("sound ") {
+            let subfolder = list_type["sound ".len()..].trim();
+            if subfolder.is_empty() {
+                self.sound_list(None);
+            } else {
+                self.sound_list(Some(subfolder));
+            }
             return;
         }
 
@@ -2486,12 +2512,116 @@ impl App {
                 }
                 self.apply_command_result(CommandResult::Output(lines));
             }
+            "encounters" => {
+                self.handle_list_encounters();
+            }
+            "commands" => {
+                self.handle_list_commands();
+            }
             other => {
                 self.apply_command_result(CommandResult::Error(format!(
-                    "Unknown subcommand \"{other}\". Try: ls players, ls npc"
+                    "Unknown subcommand \"{other}\". Try: ls players, ls npc, ls sound, ls encounters, ls commands"
                 )));
             }
         }
+    }
+
+    fn handle_list_encounters(&mut self) {
+        let gs = self.game_state.as_ref().unwrap();
+        if gs.encounter_tables.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                "No encounter tables found. Add .toml files to npc/encounters/.".to_string(),
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::plain("Encounter tables:")];
+        let mut keys: Vec<&String> = gs.encounter_tables.keys().collect();
+        keys.sort();
+        for key in keys {
+            let table = &gs.encounter_tables[key];
+            let desc = if table.description.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", table.description)
+            };
+            lines.push(StyledLine::plain(format!(
+                "  {key} ({}){desc}",
+                table.zone_name
+            )));
+        }
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_list_commands(&mut self) {
+        let mut lines = vec![StyledLine::new(
+            "Available commands:".to_string(),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        let builtin = [
+            ("calc", "evaluate math expression"),
+            ("cat", "display a campaign file"),
+            ("clear", "clear the output history"),
+            ("combat", "start or end combat mode"),
+            ("damage", "deal damage to a character"),
+            ("encounter", "encounter tables"),
+            ("give", "transfer item between characters"),
+            ("heal", "heal a character"),
+            ("help", "show detailed help"),
+            ("history", "show recent state changes"),
+            ("init", "manage initiative tracker"),
+            ("ls", "list things (players, npc, sound, encounters, commands)"),
+            ("load", "load a campaign folder"),
+            ("map", "toggle map view / map commands"),
+            ("new", "create a new campaign from template"),
+            ("next", "next initiative turn"),
+            ("note", "add a session note"),
+            ("prev", "previous initiative turn"),
+            ("quit", "exit Rustory"),
+            ("redo", "re-apply last undone change"),
+            ("roll", "roll dice"),
+            ("search", "search rulebooks and notes"),
+            ("set", "set a character field"),
+            ("show", "display character sheet"),
+            ("sound", "audio playback commands"),
+            ("spawn", "spawn an NPC from template"),
+            ("status", "show combat status"),
+            ("target", "set or show combat target"),
+            ("undo", "revert last state change"),
+            ("validate", "check campaign files"),
+            ("where", "show character locations"),
+            ("who", "player dashboard"),
+        ];
+
+        for (name, desc) in &builtin {
+            lines.push(StyledLine::plain(format!("  {name:<12} {desc}")));
+        }
+
+        // Add custom commands if any
+        if let Some(gs) = &self.game_state {
+            if !gs.custom_commands.is_empty() {
+                lines.push(StyledLine::new(String::new(), Style::default()));
+                lines.push(StyledLine::new(
+                    "Custom commands:".to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
+                let mut cmd_names: Vec<&String> = gs.custom_commands.keys().collect();
+                cmd_names.sort();
+                for name in cmd_names {
+                    let line = if let Some(desc) = gs.custom_command_docs.get(name) {
+                        let first_line = desc.lines().next().unwrap_or("");
+                        format!("  {name:<12} {first_line}")
+                    } else {
+                        format!("  {name}")
+                    };
+                    lines.push(StyledLine::plain(line));
+                }
+            }
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
     }
 
     fn handle_spawn_command(&mut self, args: &str) {
@@ -2656,32 +2786,7 @@ impl App {
 
         match subcmd {
             "ls" | "" => {
-                // List all encounter zones
-                if gs.encounter_tables.is_empty() {
-                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                        "No encounter tables found. Add .toml files to npc/encounters/."
-                            .to_string(),
-                        Style::default().fg(Color::Yellow),
-                    )]));
-                    return;
-                }
-
-                let mut lines = vec![StyledLine::plain("Encounter tables:")];
-                let mut keys: Vec<&String> = gs.encounter_tables.keys().collect();
-                keys.sort();
-                for key in keys {
-                    let table = &gs.encounter_tables[key];
-                    let desc = if table.description.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" — {}", table.description)
-                    };
-                    lines.push(StyledLine::plain(format!(
-                        "  {key} ({}){desc}",
-                        table.zone_name
-                    )));
-                }
-                self.apply_command_result(CommandResult::Output(lines));
+                self.handle_list_encounters();
             }
             "show" => {
                 if sub_args.is_empty() {
@@ -6837,7 +6942,11 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            output.contains("ls players") && output.contains("ls npc"),
+            output.contains("ls players")
+                && output.contains("ls npc")
+                && output.contains("ls sound")
+                && output.contains("ls encounters")
+                && output.contains("ls commands"),
             "Should show available subcommands. Got: {output}"
         );
     }
@@ -6876,6 +6985,253 @@ mod tests {
         assert!(
             output.contains("Hero"),
             "list alias should still work. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_ls_sound_shows_library() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_sound");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("sound/ambiance")).unwrap();
+        std::fs::write(campaign.join("sound/ambiance/tavern.mp3"), b"fake").unwrap();
+        std::fs::write(campaign.join("sound/theme.flac"), b"fake").unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls sound");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Sound library") && output.contains("ambiance"),
+            "ls sound should show library. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_ls_sound_subfolder() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_sound_sub");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("sound/ambiance")).unwrap();
+        std::fs::write(campaign.join("sound/ambiance/tavern.mp3"), b"fake").unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls sound/ambiance");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("tavern.mp3"),
+            "ls sound/ambiance should list files. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_ls_sound_space_subfolder() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_sound_space");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("sound/ambiance")).unwrap();
+        std::fs::write(campaign.join("sound/ambiance/forest.ogg"), b"fake").unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls sound ambiance");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("forest.ogg"),
+            "ls sound ambiance should list subfolder. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_ls_encounters_shows_zones() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_enc");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("npc/encounters")).unwrap();
+        std::fs::write(
+            campaign.join("npc/encounters/forest.toml"),
+            r#"[zone]
+name = "Dark Forest"
+description = "A dangerous forest"
+
+[[entries]]
+name = "Wolves"
+weight = 1
+"#,
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls encounters");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("forest") && output.contains("Dark Forest"),
+            "ls encounters should list zones. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_ls_encounters_empty() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_enc_empty");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls encounters");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No encounter tables"),
+            "ls encounters with none should report empty. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_ls_commands_shows_builtin() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_cmds");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls commands");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("roll") && output.contains("help") && output.contains("quit"),
+            "ls commands should list built-in commands. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_ls_commands_shows_custom() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("ls_cmds_custom");
+        std::fs::create_dir_all(campaign.join("rules/commands")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign.join("rules/commands/zap.lol"),
+            "HAI 1.2\nVISIBLE \"zap!\"\nKTHXBYE\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign.join("rules/commands/README.md"),
+            "## zap\nElectric attack command\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("ls commands");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("zap") && output.contains("Electric attack"),
+            "ls commands should include custom commands with docs. Got: {output}"
         );
     }
 
