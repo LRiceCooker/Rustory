@@ -435,6 +435,11 @@ impl App {
         self.redo_stack.clear();
 
         // Handle app-level commands that need access to App state
+        if command == mapping::CLEAR {
+            self.messages.clear();
+            self.scroll_offset = 0;
+            return;
+        }
         if command == mapping::CAT {
             self.handle_cat_command(args);
             return;
@@ -670,6 +675,7 @@ impl App {
             ),
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
             StyledLine::plain("  cat      — display a file (e.g. cat npc/goblin_king/dialogues.md)"),
+            StyledLine::plain("  clear    — clear the output history"),
             StyledLine::plain("  show     — display character sheet (e.g. show thorin)"),
             StyledLine::plain("  set      — set a character field (e.g. set thorin.hp 35)"),
             StyledLine::plain("  ls       — list players or npcs (e.g. ls players)"),
@@ -4324,6 +4330,20 @@ mod tests {
         assert_eq!(app.scroll_offset, 0);
         // Can't go below 0
         app.on_key(KeyEvent::from(KeyCode::PageDown));
+        assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn test_clear_clears_output_and_scroll() {
+        let mut app = App::new();
+        app.running = true;
+        // Add some messages and scroll offset
+        app.dispatch_command("help");
+        assert!(!app.messages.is_empty());
+        app.scroll_offset = 15;
+        // Clear should empty messages and reset scroll
+        app.dispatch_command("clear");
+        assert!(app.messages.is_empty());
         assert_eq!(app.scroll_offset, 0);
     }
 

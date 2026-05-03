@@ -98,6 +98,9 @@ pub fn dispatch(
     // Built-in commands ALWAYS take priority (security)
     match command {
         mapping::CAT => CommandResult::Error("cat command must be handled by the app".to_string()),
+        mapping::CLEAR => {
+            CommandResult::Error("clear command must be handled by the app".to_string())
+        }
         mapping::QUIT => CommandResult::Quit,
         mapping::HELP => help(),
         mapping::LOAD => {
