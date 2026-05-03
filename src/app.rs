@@ -4349,6 +4349,57 @@ mod tests {
         assert_eq!(app.autocomplete_hint(), Some("p".to_string()));
     }
 
+    // --- Tab autocomplete acceptance tests ---
+
+    #[test]
+    fn test_tab_accepts_autocomplete_hint() {
+        let mut app = App::new();
+        app.running = true;
+        app.input = "he".to_string();
+        app.cursor_position = 2;
+
+        // Tab should fill "help"
+        app.on_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.input, "help");
+        assert_eq!(app.cursor_position, 4);
+    }
+
+    #[test]
+    fn test_tab_no_match_does_nothing() {
+        let mut app = App::new();
+        app.running = true;
+        app.input = "zzz".to_string();
+        app.cursor_position = 3;
+
+        // Tab with no matching hint should leave input unchanged
+        app.on_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.input, "zzz");
+        assert_eq!(app.cursor_position, 3);
+    }
+
+    #[test]
+    fn test_tab_completes_custom_command() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("rules/commands")).unwrap();
+        std::fs::write(
+            dir.path().join("rules/commands/smite.lol"),
+            "HAI 1.2\nVISIBLE \"smite!\"\nKTHXBYE\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(dir.path());
+
+        app.input = "sm".to_string();
+        app.cursor_position = 2;
+
+        // Tab should fill "smite"
+        app.on_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.input, "smite");
+        assert_eq!(app.cursor_position, 5);
+    }
+
     // --- search command tests ---
 
     // --- map mode tests ---
