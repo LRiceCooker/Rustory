@@ -202,6 +202,15 @@ impl TestCampaign {
         self
     }
 
+    /// Add an encounter table TOML file to the campaign's npc/encounters/ directory.
+    /// `zone_name` is the filename (without .toml), `toml_content` is the TOML string.
+    pub fn with_encounter(self, zone_name: &str, toml_content: &str) -> Self {
+        let enc_dir = self.dir.path().join("npc").join("encounters");
+        fs::create_dir_all(&enc_dir).unwrap();
+        fs::write(enc_dir.join(format!("{zone_name}.toml")), toml_content).unwrap();
+        self
+    }
+
     pub fn with_map(self, json: &str) -> Self {
         let map_dir = self.dir.path().join("map");
         fs::create_dir_all(&map_dir).unwrap();
@@ -2268,5 +2277,394 @@ success = \"result >= dc\"
                 "PbtA check should produce Success, Failure, or Partial"
             );
         }
+    }
+
+    // ---- Phase 23.2 E2E: Encounter commands ----
+
+    fn encounter_system_toml() -> &'static str {
+        "[system]\nname = \"EncounterTest\"\n\n\
+         [character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n\n\
+         [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n"
+    }
+
+    fn encounter_forest_toml() -> &'static str {
+        r#"[zone]
+name = "Dark Forest"
+description = "A dense, dangerous woodland"
+
+[[entries]]
+name = "Goblin Patrol"
+description = "Three goblins on patrol"
+weight = 30
+npcs = ["goblin"]
+
+[[entries]]
+name = "Traveling Merchant"
+weight = 15
+npcs = ["shopkeeper"]
+
+[[entries]]
+name = "Nothing happens"
+weight = 35
+npcs = []
+"#
+    }
+
+    fn encounter_test_campaign() -> TestCampaign {
+        TestCampaign::new()
+            .with_system_toml(encounter_system_toml())
+            .with_npc("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
+            .with_npc("shopkeeper", "name,strength,hp_max,ac\nShopkeeper,10,12,10\n")
+            .with_encounter("forest", encounter_forest_toml())
+    }
+
+    #[test]
+    fn test_e2e_encounter_ls_shows_zones() {
+        let campaign = encounter_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter ls");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("forest"),
+            "encounter ls should list the forest zone. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Dark Forest"),
+            "encounter ls should show zone name. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_ls_no_args_also_lists() {
+        let campaign = encounter_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("forest"),
+            "encounter with no args should list zones. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_show_displays_entries() {
+        let campaign = encounter_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter show forest");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Goblin Patrol"),
+            "encounter show should list entries. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Traveling Merchant"),
+            "encounter show should list all entries. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Nothing happens"),
+            "encounter show should list all entries. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("w=30"),
+            "encounter show should display weights. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_show_unknown_zone() {
+        let campaign = encounter_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter show dungeon");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("not found"),
+            "Should report unknown zone. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_roll_spawns_npcs() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(encounter_system_toml())
+            .with_npc("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
+            .with_encounter(
+                "cave",
+                r#"[zone]
+name = "Cave"
+
+[[entries]]
+name = "Goblin Ambush"
+weight = 100
+npcs = ["goblin", "goblin"]
+"#,
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        // Record initial NPC count
+        let initial_npc_count = harness.game_state().unwrap().npcs.len();
+
+        harness.execute("encounter roll cave");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Encounter: Goblin Ambush"),
+            "Should show encounter name. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Spawned"),
+            "Should show spawned NPCs. Output: {all_output}"
+        );
+
+        // Should have spawned 2 NPCs
+        let gs = harness.game_state().unwrap();
+        assert_eq!(
+            gs.npcs.len(),
+            initial_npc_count + 2,
+            "Should have spawned 2 NPCs"
+        );
+        assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
+        assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
+    }
+
+    #[test]
+    fn test_e2e_encounter_roll_no_npcs_entry() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(encounter_system_toml())
+            .with_encounter(
+                "peaceful",
+                r#"[zone]
+name = "Peaceful Meadow"
+
+[[entries]]
+name = "Nothing happens"
+weight = 100
+npcs = []
+"#,
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter roll peaceful");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Encounter: Nothing happens"),
+            "Should show encounter name. Output: {all_output}"
+        );
+        // No spawned message since no NPCs
+        assert!(
+            !all_output.contains("Spawned"),
+            "Should not show spawned if no NPCs. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_roll_missing_npc_folder() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(encounter_system_toml())
+            .with_encounter(
+                "broken",
+                r#"[zone]
+name = "Broken Zone"
+
+[[entries]]
+name = "Ghost encounter"
+weight = 100
+npcs = ["nonexistent_npc"]
+"#,
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter roll broken");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Encounter: Ghost encounter"),
+            "Should show encounter name. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Warning") && all_output.contains("not found"),
+            "Should warn about missing NPC folder. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_roll_deterministic() {
+        let campaign_toml = encounter_system_toml();
+        let forest_toml = encounter_forest_toml();
+
+        // Create two campaigns with same encounter tables, same seed
+        let campaign1 = TestCampaign::new()
+            .with_system_toml(campaign_toml)
+            .with_npc("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
+            .with_npc("shopkeeper", "name,strength,hp_max,ac\nShopkeeper,10,12,10\n")
+            .with_encounter("forest", forest_toml);
+
+        let campaign2 = TestCampaign::new()
+            .with_system_toml(campaign_toml)
+            .with_npc("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
+            .with_npc("shopkeeper", "name,strength,hp_max,ac\nShopkeeper,10,12,10\n")
+            .with_encounter("forest", forest_toml);
+
+        let mut app1 = rustory::app::App::with_rng(Box::new(StdRng::seed_from_u64(42)));
+        app1.running = true;
+        app1.load_campaign(campaign1.path());
+        app1.dispatch_command("encounter roll forest");
+
+        let mut app2 = rustory::app::App::with_rng(Box::new(StdRng::seed_from_u64(42)));
+        app2.running = true;
+        app2.load_campaign(campaign2.path());
+        app2.dispatch_command("encounter roll forest");
+
+        // Both should produce the same encounter name (last non-echo message)
+        let out1 = app1
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.text.starts_with("Encounter:"))
+            .map(|m| m.text.clone());
+        let out2 = app2
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.text.starts_with("Encounter:"))
+            .map(|m| m.text.clone());
+        assert_eq!(out1, out2, "Same seed should produce same encounter");
+    }
+
+    #[test]
+    fn test_e2e_encounter_no_campaign() {
+        let mut harness = TestHarness::new();
+        harness.execute("encounter ls");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("No campaign loaded"),
+            "Should report no campaign. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_empty_tables() {
+        let campaign =
+            TestCampaign::new().with_system_toml("[system]\nname = \"NoEncounters\"\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter ls");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("No encounter tables"),
+            "Should report no tables. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_ls_multiple_zones() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(encounter_system_toml())
+            .with_encounter(
+                "forest",
+                "[zone]\nname = \"Dark Forest\"\n\n[[entries]]\nname = \"Wolf\"\nweight = 50\nnpcs = []\n",
+            )
+            .with_encounter(
+                "dungeon",
+                "[zone]\nname = \"Shadowy Dungeon\"\n\n[[entries]]\nname = \"Skeleton\"\nweight = 50\nnpcs = []\n",
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter ls");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("forest") && all_output.contains("dungeon"),
+            "Should list both zones. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Dark Forest") && all_output.contains("Shadowy Dungeon"),
+            "Should show zone names. Output: {all_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_encounter_unknown_subcommand() {
+        let campaign = encounter_test_campaign();
+        let mut harness = TestHarness::from_campaign(&campaign);
+        harness.execute("encounter foobar");
+
+        let all_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_output.contains("Unknown subcommand"),
+            "Should report unknown subcommand. Output: {all_output}"
+        );
     }
 }

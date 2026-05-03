@@ -5,6 +5,7 @@ pub mod primitives;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::encounters::EncounterTable;
 use crate::rules::{self, CampaignRules, CampaignSchema};
 use crate::scripting::loader::LolScript;
 use crate::search::pdf_index::SearchIndex;
@@ -19,6 +20,7 @@ pub struct GameState {
     pub rules: Option<CampaignRules>,
     pub schema: Option<CampaignSchema>,
     pub custom_commands: HashMap<String, LolScript>,
+    pub encounter_tables: HashMap<String, EncounterTable>,
     pub search_index: SearchIndex,
 }
 
@@ -37,6 +39,7 @@ impl GameState {
             rules: None,
             schema: None,
             custom_commands: HashMap::new(),
+            encounter_tables: HashMap::new(),
             search_index: SearchIndex::new(),
         }
     }
@@ -133,6 +136,10 @@ impl GameState {
 
         // Load custom commands from rules/commands/*.lol
         gs.custom_commands = crate::scripting::loader::load_custom_commands(path);
+
+        // Load encounter tables from npc/encounters/*.toml
+        let encounters_dir = path.join("npc").join("encounters");
+        gs.encounter_tables = crate::encounters::load_encounters(&encounters_dir);
 
         // Build search index from PDFs and markdown
         gs.search_index = SearchIndex::build(path);
@@ -335,14 +342,18 @@ mod tests {
         assert_eq!(thorin.get_stat("hp_max"), Some(52.0));
         assert_eq!(thorin.get_stat("ac"), Some(18.0));
 
-        // NPC: Goblin King
-        assert_eq!(gs.npcs.len(), 1);
+        // NPCs: Goblin King + Shopkeeper
+        assert_eq!(gs.npcs.len(), 2);
         let gk = gs
             .get_npc("Goblin King")
             .expect("Goblin King should be loaded");
         assert_eq!(gk.get_stat("strength"), Some(16.0));
         assert_eq!(gk.get_stat("hp_max"), Some(45.0));
         assert!(gk.lore.is_some());
+        let sk = gs
+            .get_npc("Shopkeeper")
+            .expect("Shopkeeper should be loaded");
+        assert_eq!(sk.get_stat("charisma"), Some(16.0));
     }
 
     #[test]

@@ -1992,10 +1992,257 @@ impl App {
         )]));
     }
 
-    fn handle_encounter_command(&mut self, _args: &str) {
-        self.apply_command_result(CommandResult::Error(
-            "Encounter commands are being reworked. Use: encounter ls, encounter show <zone>, encounter roll <zone>".to_string(),
-        ));
+    fn handle_encounter_command(&mut self, args: &str) {
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
+                return;
+            }
+        };
+
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let subcmd = if parts[0].is_empty() { "" } else { parts[0] };
+        let sub_args = parts.get(1).unwrap_or(&"").trim();
+
+        match subcmd {
+            "ls" | "" => {
+                // List all encounter zones
+                if gs.encounter_tables.is_empty() {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        "No encounter tables found. Add .toml files to npc/encounters/.".to_string(),
+                        Style::default().fg(Color::Yellow),
+                    )]));
+                    return;
+                }
+
+                let mut lines = vec![StyledLine::plain("Encounter tables:")];
+                let mut keys: Vec<&String> = gs.encounter_tables.keys().collect();
+                keys.sort();
+                for key in keys {
+                    let table = &gs.encounter_tables[key];
+                    let desc = if table.description.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {}", table.description)
+                    };
+                    lines.push(StyledLine::plain(format!(
+                        "  {key} ({}){desc}",
+                        table.zone_name
+                    )));
+                }
+                self.apply_command_result(CommandResult::Output(lines));
+            }
+            "show" => {
+                if sub_args.is_empty() {
+                    self.apply_command_result(CommandResult::Error(
+                        "Usage: encounter show <zone> (e.g. encounter show forest)".to_string(),
+                    ));
+                    return;
+                }
+
+                let zone = sub_args.to_lowercase();
+                let table = match gs.encounter_tables.get(&zone) {
+                    Some(t) => t,
+                    None => {
+                        self.apply_command_result(CommandResult::Error(format!(
+                            "Encounter zone \"{sub_args}\" not found. Use 'encounter ls' to see available zones."
+                        )));
+                        return;
+                    }
+                };
+
+                let total = table.total_weight();
+                let mut lines = vec![StyledLine::plain(format!(
+                    "{} — {}",
+                    table.zone_name, table.description
+                ))];
+
+                for entry in &table.entries {
+                    let pct = if total > 0 {
+                        format!("{:.0}%", entry.weight as f64 / total as f64 * 100.0)
+                    } else {
+                        "0%".to_string()
+                    };
+
+                    let npc_str = if entry.npcs.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [{}]", entry.npcs.join(", "))
+                    };
+
+                    let desc = if entry.description.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {}", entry.description)
+                    };
+
+                    lines.push(StyledLine::plain(format!(
+                        "  {}: w={} ({pct}){desc}{npc_str}",
+                        entry.name, entry.weight,
+                    )));
+                }
+
+                self.apply_command_result(CommandResult::Output(lines));
+            }
+            "roll" => {
+                if sub_args.is_empty() {
+                    self.apply_command_result(CommandResult::Error(
+                        "Usage: encounter roll <zone> (e.g. encounter roll forest)".to_string(),
+                    ));
+                    return;
+                }
+
+                let zone = sub_args.to_lowercase();
+                let table = match gs.encounter_tables.get(&zone) {
+                    Some(t) => t.clone(),
+                    None => {
+                        self.apply_command_result(CommandResult::Error(format!(
+                            "Encounter zone \"{sub_args}\" not found. Use 'encounter ls' to see available zones."
+                        )));
+                        return;
+                    }
+                };
+
+                let rolled = match table.roll(&mut self.rng) {
+                    Some(entry) => entry.clone(),
+                    None => {
+                        self.apply_command_result(CommandResult::Error(
+                            "Encounter table is empty or all weights are zero.".to_string(),
+                        ));
+                        return;
+                    }
+                };
+
+                let mut lines = vec![StyledLine::new(
+                    format!("Encounter: {}", rolled.name),
+                    Style::default().fg(Color::Green),
+                )];
+
+                if !rolled.description.is_empty() {
+                    lines.push(StyledLine::plain(rolled.description.clone()));
+                }
+
+                // Spawn referenced NPCs
+                if !rolled.npcs.is_empty() {
+                    let mut spawned_names: Vec<String> = Vec::new();
+                    for npc_folder in &rolled.npcs {
+                        let spawned = self.spawn_npc_from_folder(npc_folder);
+                        match spawned {
+                            Some(name) => spawned_names.push(name),
+                            None => {
+                                lines.push(StyledLine::new(
+                                    format!("  Warning: NPC folder \"{npc_folder}\" not found, skipping."),
+                                    Style::default().fg(Color::Yellow),
+                                ));
+                            }
+                        }
+                    }
+                    if !spawned_names.is_empty() {
+                        lines.push(StyledLine::new(
+                            format!("Spawned: {}", spawned_names.join(", ")),
+                            Style::default().fg(Color::Green),
+                        ));
+                    }
+                }
+
+                self.apply_command_result(CommandResult::Output(lines));
+            }
+            other => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Unknown subcommand \"{other}\". Try: encounter ls, encounter show <zone>, encounter roll <zone>"
+                )));
+            }
+        }
+    }
+
+    /// Spawn an NPC from a folder name (used by encounter roll).
+    /// Returns the spawned NPC's name, or None if folder not found.
+    fn spawn_npc_from_folder(&mut self, folder_name: &str) -> Option<String> {
+        let gs = self.game_state.as_ref()?;
+        let npc_dir = gs.campaign_path.join("npc");
+        let template_folder = find_npc_folder(&npc_dir, folder_name)?;
+
+        let expected_columns: Vec<String> = gs
+            .schema
+            .as_ref()
+            .map(|s| {
+                s.character_schema
+                    .column_names()
+                    .iter()
+                    .map(|c| c.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let expected_refs: Vec<&str> = expected_columns.iter().map(|s| s.as_str()).collect();
+
+        let template_char =
+            crate::game_state::loader::load_character_from_folder(&template_folder, &expected_refs)
+                .ok()?;
+
+        // Auto-generate name
+        let base = &template_char.name;
+        let mut counter = 1u32;
+        let npc_name = loop {
+            let candidate = format!("{base} #{counter}");
+            let gs = self.game_state.as_ref().unwrap();
+            if gs.get_npc(&candidate).is_none() {
+                break candidate;
+            }
+            counter += 1;
+        };
+
+        let mut character = crate::game_state::Character::new(&npc_name);
+        for stat in &template_char.stats {
+            character.stats.push(stat.clone());
+        }
+
+        // Apply resource_defs
+        let gs = self.game_state.as_ref().unwrap();
+        if let Some(rules) = &gs.rules {
+            for def in &rules.resource_defs {
+                match def {
+                    crate::rules::loader::ResourceDef::Gauge { name, max_stat } => {
+                        if !character.gauges.contains_key(name) {
+                            let max_val = character.get_stat(max_stat).unwrap_or(0.0);
+                            if max_val > 0.0 {
+                                character.gauges.insert(
+                                    name.clone(),
+                                    crate::game_state::primitives::Gauge::new(name, max_val),
+                                );
+                            }
+                        }
+                    }
+                    crate::rules::loader::ResourceDef::Pool {
+                        name,
+                        max,
+                        resets_on,
+                    } => {
+                        if !character.pools.contains_key(name) {
+                            character.pools.insert(
+                                name.clone(),
+                                crate::game_state::primitives::Pool::new(
+                                    name,
+                                    *max,
+                                    resets_on.clone(),
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Persist if available
+        let schema = gs.schema.clone();
+        let description = format!("Spawned {npc_name} from encounter ({folder_name})");
+        if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &schema) {
+            let _ = pl.persist_character(&character, false, schema, &description);
+        }
+
+        let result_name = npc_name.clone();
+        self.game_state.as_mut().unwrap().add_npc(character);
+        Some(result_name)
     }
 
     fn handle_combat_command(&mut self, args: &str) {

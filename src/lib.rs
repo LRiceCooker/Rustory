@@ -2,6 +2,7 @@ pub mod app;
 pub mod audio;
 pub mod combat;
 pub mod commands;
+pub mod encounters;
 pub mod game_state;
 pub mod map;
 pub mod notes;

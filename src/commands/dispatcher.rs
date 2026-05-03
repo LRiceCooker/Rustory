@@ -141,6 +141,9 @@ pub fn dispatch(
         mapping::NOTE => {
             CommandResult::Error("note command must be handled by the app".to_string())
         }
+        mapping::ENCOUNTER => {
+            CommandResult::Error("encounter command must be handled by the app".to_string())
+        }
         _ => {
             // Look up in custom commands HashMap
             if let Some(commands) = custom_commands {

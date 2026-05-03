@@ -1,0 +1,27 @@
+[zone]
+name = "Dark Forest"
+description = "A dense, dangerous woodland full of lurking creatures"
+
+[[entries]]
+name = "Goblin Patrol"
+description = "Three goblin warriors led by their king"
+weight = 30
+npcs = ["goblin_king", "goblin_king", "goblin_king"]
+
+[[entries]]
+name = "Traveling Merchant"
+description = "A friendly shopkeeper passing through"
+weight = 15
+npcs = ["shopkeeper"]
+
+[[entries]]
+name = "Nothing happens"
+description = "The forest is quiet... for now"
+weight = 35
+npcs = []
+
+[[entries]]
+name = "Lone Goblin Scout"
+description = "A single goblin spying on the party"
+weight = 20
+npcs = ["goblin_king"]

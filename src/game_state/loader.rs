@@ -64,6 +64,10 @@ pub fn load_characters_from_dir(dir: &Path, expected_columns: &[&str]) -> LoadRe
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
+            // Skip the encounters/ subdirectory (handled by encounter loader)
+            if path.file_name().and_then(|n| n.to_str()) == Some("encounters") {
+                continue;
+            }
             subdirs.push(path);
         } else if path.extension().and_then(|e| e.to_str()) == Some("csv") {
             csv_files.push(path);
