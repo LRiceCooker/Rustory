@@ -1957,4 +1957,68 @@ KTHXBYE",
             "Tracker should be cleared"
         );
     }
+
+    // ---- Phase 21 E2E: Session notes ----
+
+    #[test]
+    fn test_e2e_note_add_and_list() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"NoteTest\"\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+
+        // Add a note
+        harness.execute("note The party entered the cave");
+        let add_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            add_output.contains("Note added"),
+            "Should confirm note. Output: {add_output}"
+        );
+
+        // List today's notes
+        harness.execute("note list");
+        let list_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            list_output.contains("party entered the cave"),
+            "note list should show the note. Output: {list_output}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_search_finds_note() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"SearchNoteTest\"\n");
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+
+        // Add a note
+        harness.execute("note The party entered the cave");
+
+        // Search for content from the note
+        harness.execute("search cave");
+        let search_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            search_output.contains("cave"),
+            "search should find content from notes. Output: {search_output}"
+        );
+        assert!(
+            search_output.contains("notes/") || search_output.contains(".md"),
+            "search result should reference notes source. Output: {search_output}"
+        );
+    }
 }

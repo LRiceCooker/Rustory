@@ -2511,6 +2511,10 @@ impl App {
                             };
                             let _ = pl.commit(&msg);
                         }
+                        // Re-index notes so search finds the new note
+                        if let Some(ref mut gs) = self.game_state {
+                            gs.search_index.index_notes(&campaign_path);
+                        }
                         self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
                             format!("Note added to {date}.md"),
                             Style::default().fg(Color::Green),
