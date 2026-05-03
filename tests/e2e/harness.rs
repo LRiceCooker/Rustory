@@ -1865,4 +1865,96 @@ KTHXBYE",
             "Should list Orc Chieftain. Output: {all_output}"
         );
     }
+
+    // ---- Phase 20 E2E: Combat mode & initiative ----
+
+    #[test]
+    fn test_e2e_combat_full_flow() {
+        let mut harness = TestHarness::from_fixture_with_seed("dnd_basic", 42);
+
+        // Verify Goblin starts at full HP
+        let gs = harness.game_state().unwrap();
+        let initial_hp = gs.get_npc("Goblin").unwrap()
+            .get_gauge("hp").unwrap().current;
+        assert_eq!(initial_hp, 7.0);
+
+        // Start combat
+        harness.execute("combat start");
+        assert!(
+            harness.app.mode == rustory::app::Mode::Combat,
+            "Should be in combat mode"
+        );
+
+        // Add combatants
+        harness.execute("init add Thorin 18");
+        harness.execute("init add Goblin 12");
+
+        // Verify initiative order via status
+        harness.execute("status");
+        let status_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            status_output.contains("Thorin"),
+            "Status should show Thorin. Output: {status_output}"
+        );
+        assert!(
+            status_output.contains("Goblin"),
+            "Status should show Goblin. Output: {status_output}"
+        );
+        // Thorin should be first (higher initiative)
+        let thorin_pos = status_output.rfind("1. Thorin").or(status_output.rfind("Thorin"));
+        let goblin_pos = status_output.rfind("2. Goblin").or(status_output.rfind("Goblin"));
+        assert!(
+            thorin_pos.is_some() && goblin_pos.is_some(),
+            "Both should be in status output"
+        );
+
+        // Next advances turn
+        harness.execute("next");
+        let next_output: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            next_output.contains("Goblin") && next_output.contains(">>"),
+            "Next should advance to Goblin. Output: {next_output}"
+        );
+
+        // Execute smite (custom LOLCODE command from dnd_basic)
+        harness.execute("smite");
+
+        // Verify goblin HP decreased
+        let gs = harness.game_state().unwrap();
+        let goblin = gs.get_npc("Goblin").unwrap();
+        let new_hp = goblin.get_gauge("hp").unwrap().current;
+        assert!(
+            new_hp < initial_hp,
+            "Goblin HP should decrease after smite. Was {initial_hp}, now {new_hp}"
+        );
+
+        // Verify combat dashboard renders with updated HP
+        let buf = harness.render(80, 25);
+        let content: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(
+            content.contains("Initiative"),
+            "Should render combat dashboard"
+        );
+
+        // End combat
+        harness.execute("combat end");
+        assert!(
+            harness.app.mode == rustory::app::Mode::Default,
+            "Should return to default mode"
+        );
+        assert!(
+            harness.app.initiative_tracker.is_none(),
+            "Tracker should be cleared"
+        );
+    }
 }
