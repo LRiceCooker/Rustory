@@ -810,7 +810,7 @@ impl App {
         std::fs::create_dir_all(dest.join("notes"))?;
 
         // Copy optional template directories if they exist
-        let optional_dirs = ["map", "sound", "bestiary"];
+        let optional_dirs = ["map", "sound"];
         for dir_name in &optional_dirs {
             let src = template.join(dir_name);
             if src.exists() && src.is_dir() {
