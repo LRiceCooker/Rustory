@@ -271,6 +271,7 @@ impl App {
             (KeyCode::Esc, _) => self.running = false,
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => self.running = false,
             (KeyCode::Enter, _) => self.submit_input(),
+            (KeyCode::Tab, _) => self.accept_autocomplete(),
             (KeyCode::Char(c), _) => self.insert_char(c),
             (KeyCode::Backspace, _) => self.delete_char_before(),
             (KeyCode::Delete, _) => self.delete_char_at(),
@@ -3188,6 +3189,13 @@ impl App {
         }
 
         None
+    }
+
+    fn accept_autocomplete(&mut self) {
+        if let Some(hint) = self.autocomplete_hint() {
+            self.input.push_str(&hint);
+            self.cursor_position = self.input.len();
+        }
     }
 
     fn insert_char(&mut self, c: char) {
