@@ -6,6 +6,7 @@ use crate::app::App;
 /// - `app`: reference to the App (provides access to GameState, WorldMap, SoundLibrary, etc.)
 /// - `arg_index`: 0-based index of the argument being completed (0 = first arg after command)
 /// - `partial`: what the user has typed so far for this argument
+///
 /// Returns a list of possible completions (full argument values, not suffixes).
 pub type ArgCompleter = fn(app: &App, arg_index: usize, partial: &str) -> Vec<String>;
 
@@ -169,7 +170,6 @@ fn complete_spawn(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
 
 /// Static subcommand lists for commands that take subcommands.
 /// Used for arg_index 0 completion (the first argument after the command name).
-
 const LS_SUBCOMMANDS: &[&str] = &["commands", "encounters", "npc", "players", "sound"];
 const SOUND_SUBCOMMANDS: &[&str] = &[
     "list", "loop", "pause", "play", "resume", "search", "status", "stop", "volume",
@@ -304,10 +304,7 @@ fn complete_sound(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
     // Determine subcommand, accounting for aliases (e.g., "play" → "sound play")
     let input = &app.input;
     let parts: Vec<&str> = input.split_whitespace().collect();
-    let first_word = parts
-        .first()
-        .map(|s| s.to_lowercase())
-        .unwrap_or_default();
+    let first_word = parts.first().map(|s| s.to_lowercase()).unwrap_or_default();
 
     let resolved = crate::commands::mapping::resolve_alias(&first_word);
     let resolved_parts: Vec<&str> = resolved.split_whitespace().collect();
@@ -773,8 +770,7 @@ mod tests {
         fs::write(root.join("theme.flac"), b"fake").unwrap();
 
         let mut app = App::new();
-        app.sound_library =
-            crate::audio::library::SoundLibrary::scan(root).unwrap();
+        app.sound_library = crate::audio::library::SoundLibrary::scan(root).unwrap();
         (app, dir)
     }
 

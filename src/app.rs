@@ -105,7 +105,8 @@ pub struct App {
     pub redo_stack: Vec<String>,
     pub initiative_tracker: Option<InitiativeTracker>,
     pub current_target: Option<String>,
-    pub autocomplete_registry: std::collections::HashMap<&'static str, crate::commands::autocomplete::ArgCompleter>,
+    pub autocomplete_registry:
+        std::collections::HashMap<&'static str, crate::commands::autocomplete::ArgCompleter>,
 }
 
 impl Default for App {
