@@ -2850,4 +2850,100 @@ npcs = ["nonexistent_npc"]
             "s thorin should show strength value. Output: {all_output}"
         );
     }
+
+    // --- Argument autocomplete E2E tests (Phase 25.5) ---
+
+    #[test]
+    fn test_e2e_autocomplete_show_character_hint() {
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"AutocompleteTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+            )
+            .with_player("thorin", "name,strength\nThorin,18\n");
+
+        let harness = TestHarness::from_campaign(&campaign);
+
+        // Type "show th" — hint should be "orin" (suffix of "thorin" after "th")
+        let mut app = harness.app;
+        app.input = "show th".to_string();
+        let hint = app.autocomplete_hint();
+        assert_eq!(
+            hint,
+            Some("orin".to_string()),
+            "show th should hint 'orin' to complete 'thorin'"
+        );
+    }
+
+    #[test]
+    fn test_e2e_autocomplete_show_character_tab_accepts() {
+        use crossterm::event::{KeyCode, KeyEvent};
+
+        let campaign = TestCampaign::new()
+            .with_system_toml(
+                "[system]\nname = \"AutocompleteTest\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+            )
+            .with_player("thorin", "name,strength\nThorin,18\n");
+
+        let harness = TestHarness::from_campaign(&campaign);
+        let mut app = harness.app;
+
+        // Set input to "show th" and press Tab
+        app.input = "show th".to_string();
+        app.cursor_position = 7;
+        app.on_key(KeyEvent::from(KeyCode::Tab));
+
+        assert_eq!(
+            app.input, "show thorin",
+            "Tab should complete 'show th' to 'show thorin'"
+        );
+        assert_eq!(app.cursor_position, 11);
+    }
+
+    #[test]
+    fn test_e2e_autocomplete_sound_play_hint() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"SoundAutoTest\"\n")
+            .with_sound_file("ambiance/tavern.mp3", b"fake-audio")
+            .with_sound_file("sfx/sword.wav", b"fake-audio");
+
+        let harness = TestHarness::from_campaign(&campaign);
+
+        // Type "sound play amb" — hint should include the ambiance path
+        let mut app = harness.app;
+        app.input = "sound play amb".to_string();
+        let hint = app.autocomplete_hint();
+        assert!(
+            hint.is_some(),
+            "sound play amb should produce a hint for ambiance path"
+        );
+        let hint_str = hint.unwrap();
+        // The completed path should contain "ambiance" and the file
+        let completed = format!("amb{hint_str}");
+        assert!(
+            completed.contains("ambiance"),
+            "Completed path should contain 'ambiance', got: {completed}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_autocomplete_encounter_roll_hint() {
+        let campaign = TestCampaign::new()
+            .with_system_toml("[system]\nname = \"EncAutoTest\"\n")
+            .with_encounter(
+                "forest",
+                "[zone]\nname = \"Dark Forest\"\ndescription = \"A spooky forest\"\n\n[[entries]]\nname = \"Wolf Pack\"\nweight = 50\n",
+            );
+
+        let harness = TestHarness::from_campaign(&campaign);
+
+        // Type "encounter roll f" — hint should be "orest"
+        let mut app = harness.app;
+        app.input = "encounter roll f".to_string();
+        let hint = app.autocomplete_hint();
+        assert_eq!(
+            hint,
+            Some("orest".to_string()),
+            "encounter roll f should hint 'orest' to complete 'forest'"
+        );
+    }
 }
