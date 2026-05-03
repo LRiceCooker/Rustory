@@ -151,7 +151,9 @@ pub fn dispatch(
         mapping::SEARCH => {
             CommandResult::Error("search command must be handled by the app".to_string())
         }
-        mapping::MAP => CommandResult::Error("map command must be handled by the app".to_string()),
+        mapping::MAP | mapping::MAP_MOVE_ALIAS => {
+            CommandResult::Error("map command must be handled by the app".to_string())
+        }
         mapping::SOUND | mapping::SOUND_PLAY_ALIAS => {
             CommandResult::Error("sound command must be handled by the app".to_string())
         }

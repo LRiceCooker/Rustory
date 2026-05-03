@@ -488,6 +488,10 @@ impl App {
             self.sound_play(args);
             return;
         }
+        if command == mapping::MAP_MOVE_ALIAS {
+            self.map_move(args);
+            return;
+        }
         if command == mapping::VALIDATE {
             self.handle_validate_command(args);
             return;
@@ -5408,6 +5412,50 @@ mod tests {
                 .any(|t| t.contains("not found on the map")),
             "Should reject invalid location. Messages: {output_texts:?}"
         );
+    }
+
+    #[test]
+    fn test_mv_alias_moves_character() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("mv_alias_test");
+        std::fs::create_dir_all(campaign_dir.join("rules")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign_dir.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign_dir.join("players/thorin/sheet.csv"),
+            "name\nThorin\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign_dir);
+        app.world_map = Some(make_test_world_map());
+        app.messages.clear();
+
+        // "mv Thorin Silverport" should work the same as "map move Thorin Silverport"
+        app.dispatch_command("mv Thorin Silverport");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts
+                .iter()
+                .any(|t| t.contains("moved") && t.contains("Silverport")),
+            "mv alias should move character. Messages: {output_texts:?}"
+        );
+
+        // Verify location is set
+        let thorin = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap();
+        assert_eq!(thorin.location.as_deref(), Some("Silverport"));
     }
 
     #[test]

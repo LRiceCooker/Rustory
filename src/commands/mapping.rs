@@ -12,6 +12,7 @@ pub const HELP: &str = "help";
 pub const INIT: &str = "init";
 pub const LOAD: &str = "load";
 pub const MAP: &str = "map";
+pub const MAP_MOVE_ALIAS: &str = "mv";
 pub const NEW: &str = "new";
 pub const NEXT: &str = "next";
 pub const NOTE: &str = "note";
@@ -35,8 +36,8 @@ pub const VALIDATE: &str = "validate";
 pub const WHERE: &str = "where";
 pub const WHO: &str = "who";
 
-pub const COMMANDS: [&str; 35] = [
+pub const COMMANDS: [&str; 36] = [
     CALC, CAT, CLEAR, COMBAT, DAMAGE, DAMAGE_ALIAS, ENCOUNTER, GIVE, HEAL, HEAL_ALIAS, HELP,
-    HISTORY, INIT, LIST, LOAD, MAP, NEW, NEXT, NOTE, PREV, QUIT, REDO, ROLL, SEARCH, SET, SHOW,
-    SOUND, SOUND_PLAY_ALIAS, SPAWN, STATUS, TARGET, UNDO, VALIDATE, WHERE, WHO,
+    HISTORY, INIT, LIST, LOAD, MAP, MAP_MOVE_ALIAS, NEW, NEXT, NOTE, PREV, QUIT, REDO, ROLL,
+    SEARCH, SET, SHOW, SOUND, SOUND_PLAY_ALIAS, SPAWN, STATUS, TARGET, UNDO, VALIDATE, WHERE, WHO,
 ];
