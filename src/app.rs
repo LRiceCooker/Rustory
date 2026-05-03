@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use ratatui::style::{Color, Style};
 use ratatui::DefaultTerminal;
 
@@ -2105,7 +2105,7 @@ impl App {
     fn handle_combat_command(&mut self, args: &str) {
         let parts: Vec<&str> = args.splitn(2, ' ').collect();
         let subcmd = parts[0];
-        let _sub_args = parts.get(1).unwrap_or(&"").trim();
+        let sub_args = parts.get(1).unwrap_or(&"").trim();
 
         match subcmd {
             "start" => {
@@ -2136,12 +2136,295 @@ impl App {
                     Style::default().fg(Color::Green),
                 )]));
             }
+            "init" => self.handle_init_subcommand(sub_args),
+            "next" => self.handle_combat_next(),
+            "prev" => self.handle_combat_prev(),
+            "status" => self.handle_combat_status(),
+            "target" => self.handle_combat_target(sub_args),
             _ => {
                 self.apply_command_result(CommandResult::Error(
                     format!("Unknown combat subcommand: '{subcmd}'. Use 'combat start' or 'combat end'."),
                 ));
             }
         }
+    }
+
+    fn handle_init_subcommand(&mut self, args: &str) {
+        let tracker = match self.initiative_tracker.as_mut() {
+            Some(t) => t,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Not in combat mode. Use 'combat start' first.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let action = parts[0];
+        let action_args = parts.get(1).unwrap_or(&"").trim();
+
+        match action {
+            "add" => {
+                // init add <name> <value>
+                let add_parts: Vec<&str> = action_args.rsplitn(2, ' ').collect();
+                if add_parts.len() < 2 {
+                    self.apply_command_result(CommandResult::Error(
+                        "Usage: init add <name> <value>".to_string(),
+                    ));
+                    return;
+                }
+                let value_str = add_parts[0];
+                let name = add_parts[1].trim();
+
+                match value_str.parse::<f64>() {
+                    Ok(value) => {
+                        tracker.add(name, value);
+                        tracker.sort();
+                        self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                            format!("Added {name} with initiative {value}."),
+                            Style::default().fg(Color::Green),
+                        )]));
+                    }
+                    Err(_) => {
+                        self.apply_command_result(CommandResult::Error(
+                            format!("Invalid initiative value: '{value_str}'. Must be a number."),
+                        ));
+                    }
+                }
+            }
+            "remove" => {
+                if action_args.is_empty() {
+                    self.apply_command_result(CommandResult::Error(
+                        "Usage: init remove <name>".to_string(),
+                    ));
+                    return;
+                }
+                if tracker.remove(action_args) {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        format!("Removed {action_args} from initiative."),
+                        Style::default().fg(Color::Green),
+                    )]));
+                } else {
+                    self.apply_command_result(CommandResult::Error(
+                        format!("'{action_args}' not found in initiative order."),
+                    ));
+                }
+            }
+            "roll" => {
+                self.handle_init_roll(action_args);
+            }
+            _ => {
+                self.apply_command_result(CommandResult::Error(
+                    format!("Unknown init subcommand: '{action}'. Use 'init add', 'init remove', or 'init roll'."),
+                ));
+            }
+        }
+    }
+
+    fn handle_init_roll(&mut self, args: &str) {
+        // Auto-roll initiative for all loaded characters
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let modifier: i32 = if args.is_empty() {
+            0
+        } else {
+            match args.parse::<i32>() {
+                Ok(m) => m,
+                Err(_) => {
+                    self.apply_command_result(CommandResult::Error(
+                        format!("Invalid modifier: '{args}'. Must be an integer."),
+                    ));
+                    return;
+                }
+            }
+        };
+
+        // Collect character names
+        let names: Vec<String> = gs.players.iter().chain(gs.npcs.iter())
+            .map(|c| c.name.clone())
+            .collect();
+
+        if names.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "No characters loaded to roll initiative for.".to_string(),
+            ));
+            return;
+        }
+
+        let tracker = match self.initiative_tracker.as_mut() {
+            Some(t) => t,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Not in combat mode. Use 'combat start' first.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let mut lines = Vec::new();
+        for name in &names {
+            let roll: i32 = self.rng.gen_range(1..=20);
+            let total = roll + modifier;
+            tracker.add(name.clone(), total as f64);
+            lines.push(StyledLine::new(
+                format!("  {name}: rolled {roll} + {modifier} = {total}"),
+                Style::default().fg(Color::Blue),
+            ));
+        }
+        tracker.sort();
+
+        lines.insert(0, StyledLine::new(
+            "Initiative rolled:".to_string(),
+            Style::default().fg(Color::Green),
+        ));
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_combat_next(&mut self) {
+        let tracker = match self.initiative_tracker.as_mut() {
+            Some(t) => t,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Not in combat mode. Use 'combat start' first.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let result = match tracker.next() {
+            Some(c) => CommandResult::Output(vec![StyledLine::new(
+                format!(">> {}'s turn (initiative: {})", c.name, c.initiative),
+                Style::default().fg(Color::Cyan),
+            )]),
+            None => CommandResult::Error(
+                "No combatants in initiative order. Use 'init add <name> <value>'.".to_string(),
+            ),
+        };
+        self.apply_command_result(result);
+    }
+
+    fn handle_combat_prev(&mut self) {
+        let tracker = match self.initiative_tracker.as_mut() {
+            Some(t) => t,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Not in combat mode. Use 'combat start' first.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let result = match tracker.prev() {
+            Some(c) => CommandResult::Output(vec![StyledLine::new(
+                format!("<< {}'s turn (initiative: {})", c.name, c.initiative),
+                Style::default().fg(Color::Cyan),
+            )]),
+            None => CommandResult::Error(
+                "No combatants in initiative order.".to_string(),
+            ),
+        };
+        self.apply_command_result(result);
+    }
+
+    fn handle_combat_status(&mut self) {
+        let tracker = match self.initiative_tracker.as_ref() {
+            Some(t) => t,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "Not in combat mode. Use 'combat start' first.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        if tracker.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                "No combatants. Use 'init add <name> <value>' to add.".to_string(),
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::new(
+            "Initiative Order:".to_string(),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        for (i, combatant) in tracker.all().iter().enumerate() {
+            let marker = if combatant.is_current { ">>" } else { "  " };
+            let mut line = format!("{marker} {}. {} (init: {})", i + 1, combatant.name, combatant.initiative);
+
+            // Show HP/conditions if character exists in game state
+            if let Some(gs) = &self.game_state {
+                let character = gs.players.iter().chain(gs.npcs.iter())
+                    .find(|c| c.name == combatant.name);
+                if let Some(ch) = character {
+                    if let Some(gauge) = ch.gauges.get("hp") {
+                        line.push_str(&format!("  HP: {}/{}", gauge.current, gauge.max));
+                    }
+                    let conditions: Vec<&str> = ch.conditions.iter()
+                        .filter(|c| c.active)
+                        .map(|c| c.name.as_str())
+                        .collect();
+                    if !conditions.is_empty() {
+                        line.push_str(&format!("  [{}]", conditions.join(", ")));
+                    }
+                }
+            }
+
+            let style = if combatant.is_current {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Blue)
+            };
+            lines.push(StyledLine::new(line, style));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_combat_target(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: target <name>".to_string(),
+            ));
+            return;
+        }
+
+        // Verify character exists
+        let exists = if let Some(gs) = &self.game_state {
+            gs.players.iter().chain(gs.npcs.iter())
+                .any(|c| c.name.to_lowercase() == args.to_lowercase())
+        } else {
+            false
+        };
+
+        if !exists {
+            // Check if combatant exists in tracker
+            let in_tracker = self.initiative_tracker.as_ref()
+                .map(|t| t.all().iter().any(|c| c.name.to_lowercase() == args.to_lowercase()))
+                .unwrap_or(false);
+            if !in_tracker {
+                self.apply_command_result(CommandResult::Error(
+                    format!("'{args}' not found."),
+                ));
+                return;
+            }
+        }
+
+        self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+            format!("Target set to: {args}"),
+            Style::default().fg(Color::Green),
+        )]));
     }
 
     fn handle_history_command(&mut self, args: &str) {
@@ -5455,5 +5738,245 @@ mod tests {
         app.dispatch_command("combat start");
         let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
         assert!(output.contains("Combat started"), "Should show start message. Got: {output}");
+    }
+
+    // ---- Combat command tests ----
+
+    #[test]
+    fn test_init_add_combatant() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.messages.clear();
+
+        app.dispatch_command("init add Thorin 18");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Added Thorin"), "Should confirm add. Got: {output}");
+
+        let tracker = app.initiative_tracker.as_ref().unwrap();
+        assert_eq!(tracker.len(), 1);
+        assert_eq!(tracker.all()[0].name, "Thorin");
+        assert_eq!(tracker.all()[0].initiative, 18.0);
+    }
+
+    #[test]
+    fn test_init_add_multiple_sorted() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+
+        app.dispatch_command("init add Goblin 12");
+        app.dispatch_command("init add Thorin 18");
+        app.dispatch_command("init add Elara 15");
+
+        let tracker = app.initiative_tracker.as_ref().unwrap();
+        assert_eq!(tracker.len(), 3);
+        // Sorted descending by initiative
+        assert_eq!(tracker.all()[0].name, "Thorin");
+        assert_eq!(tracker.all()[1].name, "Elara");
+        assert_eq!(tracker.all()[2].name, "Goblin");
+    }
+
+    #[test]
+    fn test_init_add_no_args_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.messages.clear();
+
+        app.dispatch_command("init add");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_init_add_invalid_value_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.messages.clear();
+
+        app.dispatch_command("init add Thorin abc");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Invalid initiative"), "Should show error. Got: {output}");
+    }
+
+    #[test]
+    fn test_init_remove_combatant() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.dispatch_command("init add Thorin 18");
+        app.dispatch_command("init add Goblin 12");
+        app.messages.clear();
+
+        app.dispatch_command("init remove Goblin");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Removed Goblin"), "Should confirm removal. Got: {output}");
+
+        let tracker = app.initiative_tracker.as_ref().unwrap();
+        assert_eq!(tracker.len(), 1);
+    }
+
+    #[test]
+    fn test_init_remove_not_found() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.messages.clear();
+
+        app.dispatch_command("init remove Nobody");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("not found"), "Should show not found. Got: {output}");
+    }
+
+    #[test]
+    fn test_next_advances_turn() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.dispatch_command("init add Thorin 18");
+        app.dispatch_command("init add Goblin 12");
+        app.messages.clear();
+
+        app.dispatch_command("next");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Goblin"), "Should advance to next combatant. Got: {output}");
+        assert!(output.contains(">>"), "Should show turn marker. Got: {output}");
+    }
+
+    #[test]
+    fn test_prev_goes_back() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.dispatch_command("init add Thorin 18");
+        app.dispatch_command("init add Goblin 12");
+        app.dispatch_command("next"); // Move to Goblin
+        app.messages.clear();
+
+        app.dispatch_command("prev");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Thorin"), "Should go back to Thorin. Got: {output}");
+        assert!(output.contains("<<"), "Should show prev marker. Got: {output}");
+    }
+
+    #[test]
+    fn test_next_no_combatants_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.messages.clear();
+
+        app.dispatch_command("next");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No combatants"), "Should show error. Got: {output}");
+    }
+
+    #[test]
+    fn test_status_shows_initiative_order() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.dispatch_command("init add Thorin 18");
+        app.dispatch_command("init add Goblin 12");
+        app.messages.clear();
+
+        app.dispatch_command("status");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Initiative Order"), "Should show header. Got: {output}");
+        assert!(output.contains("Thorin"), "Should show Thorin. Got: {output}");
+        assert!(output.contains("Goblin"), "Should show Goblin. Got: {output}");
+        assert!(output.contains(">>"), "Should show current turn marker. Got: {output}");
+    }
+
+    #[test]
+    fn test_status_empty_shows_message() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("combat start");
+        app.messages.clear();
+
+        app.dispatch_command("status");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No combatants"), "Should show empty message. Got: {output}");
+    }
+
+    #[test]
+    fn test_init_roll_auto_rolls_for_characters() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("init_roll");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        ).unwrap();
+        std::fs::create_dir_all(campaign.join("players/thorin")).unwrap();
+        std::fs::write(campaign.join("players/thorin/sheet.csv"), "name,strength\nThorin,18\n").unwrap();
+        std::fs::create_dir_all(campaign.join("npc/goblin")).unwrap();
+        std::fs::write(campaign.join("npc/goblin/sheet.csv"), "name,strength\nGoblin,8\n").unwrap();
+
+        let mut app = App::with_rng(Box::new(StdRng::seed_from_u64(42)));
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        app.dispatch_command("combat start");
+        app.messages.clear();
+
+        app.dispatch_command("init roll");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Initiative rolled"), "Should show roll header. Got: {output}");
+        assert!(output.contains("Thorin"), "Should show Thorin's roll. Got: {output}");
+        assert!(output.contains("Goblin"), "Should show Goblin's roll. Got: {output}");
+
+        let tracker = app.initiative_tracker.as_ref().unwrap();
+        assert_eq!(tracker.len(), 2, "Should have 2 combatants");
+    }
+
+    #[test]
+    fn test_target_sets_target() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("target_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        ).unwrap();
+        std::fs::create_dir_all(campaign.join("npc/goblin")).unwrap();
+        std::fs::write(campaign.join("npc/goblin/sheet.csv"), "name,strength\nGoblin,8\n").unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("target Goblin");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Target set to"), "Should confirm target. Got: {output}");
+    }
+
+    #[test]
+    fn test_target_not_found_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.messages.clear();
+
+        app.dispatch_command("target Nobody");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("not found"), "Should show not found. Got: {output}");
+    }
+
+    #[test]
+    fn test_combat_commands_without_combat_mode_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.messages.clear();
+
+        app.dispatch_command("init add Thorin 18");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Not in combat mode"), "Should show error. Got: {output}");
     }
 }
