@@ -48,7 +48,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
     } else if app.mode == Mode::Combat {
         // Split main area: combat dashboard + output history
-        let combat_height = app.initiative_tracker.as_ref()
+        let combat_height = app
+            .initiative_tracker
+            .as_ref()
             .map(|t| t.len() as u16 + 3) // combatants + border + header
             .unwrap_or(3)
             .min(chunks[1].height / 2)
@@ -56,10 +58,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
         let combat_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(combat_height),
-                Constraint::Min(0),
-            ])
+            .constraints([Constraint::Length(combat_height), Constraint::Min(0)])
             .split(chunks[1]);
 
         render_combat_dashboard(frame, app, combat_chunks[0]);
@@ -128,9 +127,7 @@ fn render_combat_dashboard(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     for (i, combatant) in tracker.all().iter().enumerate() {
         let marker = if combatant.is_current { ">> " } else { "   " };
-        let mut spans = vec![
-            Span::raw(format!("{marker}{}. ", i + 1)),
-        ];
+        let mut spans = vec![Span::raw(format!("{marker}{}. ", i + 1))];
 
         // Name — highlight if current
         if combatant.is_current {
@@ -146,11 +143,18 @@ fn render_combat_dashboard(frame: &mut Frame, app: &App, area: Rect) {
 
         // HP bar from game state
         if let Some(gs) = &app.game_state {
-            let character = gs.players.iter().chain(gs.npcs.iter())
+            let character = gs
+                .players
+                .iter()
+                .chain(gs.npcs.iter())
                 .find(|c| c.name == combatant.name);
             if let Some(ch) = character {
                 if let Some(gauge) = ch.gauges.get("hp") {
-                    let ratio = if gauge.max > 0.0 { gauge.current / gauge.max } else { 1.0 };
+                    let ratio = if gauge.max > 0.0 {
+                        gauge.current / gauge.max
+                    } else {
+                        1.0
+                    };
                     let hp_color = if ratio > 0.5 {
                         Color::Green
                     } else if ratio > 0.25 {
@@ -164,7 +168,9 @@ fn render_combat_dashboard(frame: &mut Frame, app: &App, area: Rect) {
                     ));
                 }
 
-                let conditions: Vec<&str> = ch.conditions.iter()
+                let conditions: Vec<&str> = ch
+                    .conditions
+                    .iter()
                     .filter(|c| c.active)
                     .map(|c| c.name.as_str())
                     .collect();
@@ -180,7 +186,7 @@ fn render_combat_dashboard(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(spans));
     }
 
-    let dashboard = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title("Initiative"));
+    let dashboard =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Initiative"));
     frame.render_widget(dashboard, area);
 }

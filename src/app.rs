@@ -10,13 +10,13 @@ use ratatui::DefaultTerminal;
 use crate::audio::library::SoundLibrary;
 use crate::audio::player::AudioPlayer;
 use crate::combat::initiative::InitiativeTracker;
-use crate::persistence::PersistenceLayer;
 use crate::commands::dispatcher::{self, CommandResult, StyledLine};
 use crate::commands::mapping;
 use crate::game_state::loader;
 use crate::game_state::GameState;
 use crate::map::renderer::MapViewport;
 use crate::map::world::WorldMap;
+use crate::persistence::PersistenceLayer;
 use crate::scripting::api::{ScriptContext, SoundCommand};
 use crate::scripting::engine::ScriptEngine;
 use crate::scripting::loader::LolScript;
@@ -191,9 +191,7 @@ impl App {
                 (KeyCode::Down, _) => self.map_viewport.pan(0.0, -50.0),
                 (KeyCode::Left, _) => self.map_viewport.pan(-50.0, 0.0),
                 (KeyCode::Right, _) => self.map_viewport.pan(50.0, 0.0),
-                (KeyCode::Char('+'), _) | (KeyCode::Char('='), _) => {
-                    self.map_viewport.zoom_in()
-                }
+                (KeyCode::Char('+'), _) | (KeyCode::Char('='), _) => self.map_viewport.zoom_in(),
                 (KeyCode::Char('-'), _) => self.map_viewport.zoom_out(),
                 _ => {}
             }
@@ -328,17 +326,17 @@ impl App {
             self.handle_note_command(args);
             return;
         }
-        if command == mapping::INIT || command == mapping::NEXT || command == mapping::PREV
-            || command == mapping::STATUS || command == mapping::TARGET
+        if command == mapping::INIT
+            || command == mapping::NEXT
+            || command == mapping::PREV
+            || command == mapping::STATUS
+            || command == mapping::TARGET
         {
-            self.handle_combat_command(&format!("{command} {args}").trim().to_string());
+            self.handle_combat_command(format!("{command} {args}").trim());
             return;
         }
         // Hybrid dispatch: built-in first, then custom commands, then unknown
-        let custom_commands = self
-            .game_state
-            .as_ref()
-            .map(|gs| &gs.custom_commands);
+        let custom_commands = self.game_state.as_ref().map(|gs| &gs.custom_commands);
         let result = dispatcher::dispatch(input, &mut self.rng, custom_commands);
 
         if let CommandResult::Custom(ref script) = result {
@@ -487,7 +485,9 @@ impl App {
             StyledLine::plain("  sound    — play audio (e.g. sound play ambiance/tavern.mp3)"),
             StyledLine::plain("  bestiary — list creature templates (e.g. bestiary info goblin)"),
             StyledLine::plain("  spawn     — create NPC from bestiary (e.g. spawn goblin)"),
-            StyledLine::plain("  encounter — spawn an encounter group (e.g. encounter goblin patrol)"),
+            StyledLine::plain(
+                "  encounter — spawn an encounter group (e.g. encounter goblin patrol)",
+            ),
             StyledLine::plain("  validate — check campaign files against schemas"),
             StyledLine::plain("  quit     — exit Rustory"),
         ];
@@ -791,11 +791,7 @@ impl App {
                         continue;
                     }
                     let pop = burg.population * 1000.0;
-                    let kind = if burg.capital > 0 {
-                        " (capital)"
-                    } else {
-                        ""
-                    };
+                    let kind = if burg.capital > 0 { " (capital)" } else { "" };
                     lines.push(StyledLine::plain(format!(
                         "  {} — pop: {:.0}{kind}",
                         burg.name, pop
@@ -846,9 +842,7 @@ impl App {
     fn map_info(&mut self, args: &str) {
         let world = self.world_map.as_ref().unwrap();
         if args.is_empty() {
-            self.apply_command_result(CommandResult::Error(
-                "Usage: map info <name>".to_string(),
-            ));
+            self.apply_command_result(CommandResult::Error("Usage: map info <name>".to_string()));
             return;
         }
 
@@ -922,7 +916,7 @@ impl App {
         }
 
         let mut lines = vec![StyledLine::new(
-            format!("Locations matching \"{}\":", args),
+            format!("Locations matching \"{args}\":"),
             Style::default().fg(Color::Cyan),
         )];
         for burg in &results {
@@ -965,7 +959,7 @@ impl App {
         }
 
         let mut lines = vec![StyledLine::new(
-            format!("Burgs near \"{}\" (within {:.0}):", name, radius),
+            format!("Burgs near \"{name}\" (within {radius:.0}):"),
             Style::default().fg(Color::Cyan),
         )];
         for (burg, dist) in &results {
@@ -994,7 +988,7 @@ impl App {
             Some(route) => {
                 let lines = vec![
                     StyledLine::new(
-                        format!("Route from {} to {}:", from, to),
+                        format!("Route from {from} to {to}:"),
                         Style::default().fg(Color::Cyan),
                     ),
                     StyledLine::plain(format!("  Type: {}", route.group)),
@@ -1023,9 +1017,7 @@ impl App {
         let gs = match &self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -1075,9 +1067,7 @@ impl App {
         let world = match &self.world_map {
             Some(w) => w,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No map loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No map loaded.".to_string()));
                 return;
             }
         };
@@ -1093,9 +1083,7 @@ impl App {
         let gs = match &mut self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -1133,7 +1121,11 @@ impl App {
         let sub_args = sub_parts.get(1).unwrap_or(&"").trim();
 
         match subcmd {
-            "list" => self.sound_list(if sub_args.is_empty() { None } else { Some(sub_args) }),
+            "list" => self.sound_list(if sub_args.is_empty() {
+                None
+            } else {
+                Some(sub_args)
+            }),
             "play" => self.sound_play(sub_args),
             "loop" => self.sound_play_loop(sub_args),
             "stop" => self.sound_stop(),
@@ -1153,7 +1145,8 @@ impl App {
     fn sound_list(&mut self, subfolder: Option<&str>) {
         if self.sound_library.is_empty() {
             self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                "Sound library is empty. Place audio files in the campaign's sound/ directory.".to_string(),
+                "Sound library is empty. Place audio files in the campaign's sound/ directory."
+                    .to_string(),
                 Style::default().fg(Color::Yellow),
             )]));
             return;
@@ -1412,7 +1405,7 @@ impl App {
         }
 
         let mut lines = vec![StyledLine::new(
-            format!("Sound files matching \"{}\":", args),
+            format!("Sound files matching \"{args}\":"),
             Style::default().fg(Color::Cyan),
         )];
 
@@ -1434,9 +1427,7 @@ impl App {
         let gs = match &self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -1465,13 +1456,15 @@ impl App {
         if let Some(field_name) = field {
             // Show a specific field
             if let Some(val) = ch.get_stat(field_name) {
-                self.apply_command_result(CommandResult::Output(vec![StyledLine::plain(
-                    format!("{}.{field_name} = {val}", ch.name),
-                )]));
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::plain(format!(
+                    "{}.{field_name} = {val}",
+                    ch.name
+                ))]));
             } else if let Some(gauge) = ch.gauges.get(field_name) {
-                self.apply_command_result(CommandResult::Output(vec![StyledLine::plain(
-                    format!("{}.{field_name} = {}/{}", ch.name, gauge.current, gauge.max),
-                )]));
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::plain(format!(
+                    "{}.{field_name} = {}/{}",
+                    ch.name, gauge.current, gauge.max
+                ))]));
             } else {
                 self.apply_command_result(CommandResult::Error(format!(
                     "Field \"{field_name}\" not found on {}.",
@@ -1623,18 +1616,24 @@ impl App {
         let gs = match &mut self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
 
         let name_lower = char_name.to_lowercase();
         let (character, is_player) = {
-            if let Some(ch) = gs.players.iter_mut().find(|c| c.name.to_lowercase() == name_lower) {
+            if let Some(ch) = gs
+                .players
+                .iter_mut()
+                .find(|c| c.name.to_lowercase() == name_lower)
+            {
                 (ch, true)
-            } else if let Some(ch) = gs.npcs.iter_mut().find(|c| c.name.to_lowercase() == name_lower) {
+            } else if let Some(ch) = gs
+                .npcs
+                .iter_mut()
+                .find(|c| c.name.to_lowercase() == name_lower)
+            {
                 (ch, false)
             } else {
                 self.apply_command_result(CommandResult::Error(format!(
@@ -1651,9 +1650,7 @@ impl App {
             let ch_name = character.name.clone();
 
             // Persist if persistence is available
-            if let (Some(ref pl), Some(ref schema)) =
-                (&self.persistence, &gs.schema)
-            {
+            if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &gs.schema) {
                 let _ = pl.persist_character(
                     character,
                     is_player,
@@ -1689,14 +1686,16 @@ impl App {
         let gs = match &self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
 
-        let list_type = if args.is_empty() { "players" } else { args.trim() };
+        let list_type = if args.is_empty() {
+            "players"
+        } else {
+            args.trim()
+        };
 
         match list_type {
             "players" => {
@@ -1755,9 +1754,7 @@ impl App {
         let gs = match &self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -1838,7 +1835,8 @@ impl App {
     fn handle_spawn_command(&mut self, args: &str) {
         if args.is_empty() {
             self.apply_command_result(CommandResult::Error(
-                "Usage: spawn <template> [name] (e.g. spawn goblin, spawn goblin \"Goblin Guard\")".to_string(),
+                "Usage: spawn <template> [name] (e.g. spawn goblin, spawn goblin \"Goblin Guard\")"
+                    .to_string(),
             ));
             return;
         }
@@ -1851,9 +1849,7 @@ impl App {
         let gs = match &self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -1917,7 +1913,11 @@ impl App {
                         if !character.pools.contains_key(name) {
                             character.pools.insert(
                                 name.clone(),
-                                crate::game_state::primitives::Pool::new(name, *max, resets_on.clone()),
+                                crate::game_state::primitives::Pool::new(
+                                    name,
+                                    *max,
+                                    resets_on.clone(),
+                                ),
                             );
                         }
                     }
@@ -1927,7 +1927,7 @@ impl App {
 
         // Persist to disk if persistence + schema available
         let schema = gs.schema.clone();
-        let description = format!("Spawned {} from bestiary", npc_name);
+        let description = format!("Spawned {npc_name} from bestiary");
         if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &schema) {
             if let Err(e) = pl.persist_character(&character, false, schema, &description) {
                 self.apply_command_result(CommandResult::Error(format!(
@@ -1960,9 +1960,7 @@ impl App {
         let gs = match &self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -1983,16 +1981,17 @@ impl App {
         for creature_def in &encounter.creatures {
             // Look up the bestiary template
             let gs = self.game_state.as_ref().unwrap();
-            let entry = match crate::bestiary::find_entry(&gs.bestiary_entries, &creature_def.template) {
-                Some(e) => e.clone(),
-                None => {
-                    errors.push(format!(
-                        "Template \"{}\" not found in bestiary.",
-                        creature_def.template
-                    ));
-                    continue;
-                }
-            };
+            let entry =
+                match crate::bestiary::find_entry(&gs.bestiary_entries, &creature_def.template) {
+                    Some(e) => e.clone(),
+                    None => {
+                        errors.push(format!(
+                            "Template \"{}\" not found in bestiary.",
+                            creature_def.template
+                        ));
+                        continue;
+                    }
+                };
 
             for i in 0..creature_def.count {
                 // Determine name: use name_override for count=1, otherwise auto-name
@@ -2032,7 +2031,9 @@ impl App {
                                     if max_val > 0.0 {
                                         character.gauges.insert(
                                             name.clone(),
-                                            crate::game_state::primitives::Gauge::new(name, max_val),
+                                            crate::game_state::primitives::Gauge::new(
+                                                name, max_val,
+                                            ),
                                         );
                                     }
                                 }
@@ -2098,7 +2099,10 @@ impl App {
         }
         if spawned_names.is_empty() && errors.is_empty() {
             lines.push(StyledLine::new(
-                format!("Encounter \"{}\" has no creatures to spawn.", encounter.name),
+                format!(
+                    "Encounter \"{}\" has no creatures to spawn.",
+                    encounter.name
+                ),
                 Style::default().fg(Color::Yellow),
             ));
         }
@@ -2146,9 +2150,9 @@ impl App {
             "status" => self.handle_combat_status(),
             "target" => self.handle_combat_target(sub_args),
             _ => {
-                self.apply_command_result(CommandResult::Error(
-                    format!("Unknown combat subcommand: '{subcmd}'. Use 'combat start' or 'combat end'."),
-                ));
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Unknown combat subcommand: '{subcmd}'. Use 'combat start' or 'combat end'."
+                )));
             }
         }
     }
@@ -2191,9 +2195,9 @@ impl App {
                         )]));
                     }
                     Err(_) => {
-                        self.apply_command_result(CommandResult::Error(
-                            format!("Invalid initiative value: '{value_str}'. Must be a number."),
-                        ));
+                        self.apply_command_result(CommandResult::Error(format!(
+                            "Invalid initiative value: '{value_str}'. Must be a number."
+                        )));
                     }
                 }
             }
@@ -2210,9 +2214,9 @@ impl App {
                         Style::default().fg(Color::Green),
                     )]));
                 } else {
-                    self.apply_command_result(CommandResult::Error(
-                        format!("'{action_args}' not found in initiative order."),
-                    ));
+                    self.apply_command_result(CommandResult::Error(format!(
+                        "'{action_args}' not found in initiative order."
+                    )));
                 }
             }
             "roll" => {
@@ -2231,9 +2235,7 @@ impl App {
         let gs = match &self.game_state {
             Some(gs) => gs,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -2244,16 +2246,19 @@ impl App {
             match args.parse::<i32>() {
                 Ok(m) => m,
                 Err(_) => {
-                    self.apply_command_result(CommandResult::Error(
-                        format!("Invalid modifier: '{args}'. Must be an integer."),
-                    ));
+                    self.apply_command_result(CommandResult::Error(format!(
+                        "Invalid modifier: '{args}'. Must be an integer."
+                    )));
                     return;
                 }
             }
         };
 
         // Collect character names
-        let names: Vec<String> = gs.players.iter().chain(gs.npcs.iter())
+        let names: Vec<String> = gs
+            .players
+            .iter()
+            .chain(gs.npcs.iter())
             .map(|c| c.name.clone())
             .collect();
 
@@ -2286,10 +2291,13 @@ impl App {
         }
         tracker.sort();
 
-        lines.insert(0, StyledLine::new(
-            "Initiative rolled:".to_string(),
-            Style::default().fg(Color::Green),
-        ));
+        lines.insert(
+            0,
+            StyledLine::new(
+                "Initiative rolled:".to_string(),
+                Style::default().fg(Color::Green),
+            ),
+        );
         self.apply_command_result(CommandResult::Output(lines));
     }
 
@@ -2332,9 +2340,7 @@ impl App {
                 format!("<< {}'s turn (initiative: {})", c.name, c.initiative),
                 Style::default().fg(Color::Cyan),
             )]),
-            None => CommandResult::Error(
-                "No combatants in initiative order.".to_string(),
-            ),
+            None => CommandResult::Error("No combatants in initiative order.".to_string()),
         };
         self.apply_command_result(result);
     }
@@ -2365,17 +2371,27 @@ impl App {
 
         for (i, combatant) in tracker.all().iter().enumerate() {
             let marker = if combatant.is_current { ">>" } else { "  " };
-            let mut line = format!("{marker} {}. {} (init: {})", i + 1, combatant.name, combatant.initiative);
+            let mut line = format!(
+                "{marker} {}. {} (init: {})",
+                i + 1,
+                combatant.name,
+                combatant.initiative
+            );
 
             // Show HP/conditions if character exists in game state
             if let Some(gs) = &self.game_state {
-                let character = gs.players.iter().chain(gs.npcs.iter())
+                let character = gs
+                    .players
+                    .iter()
+                    .chain(gs.npcs.iter())
                     .find(|c| c.name == combatant.name);
                 if let Some(ch) = character {
                     if let Some(gauge) = ch.gauges.get("hp") {
                         line.push_str(&format!("  HP: {}/{}", gauge.current, gauge.max));
                     }
-                    let conditions: Vec<&str> = ch.conditions.iter()
+                    let conditions: Vec<&str> = ch
+                        .conditions
+                        .iter()
                         .filter(|c| c.active)
                         .map(|c| c.name.as_str())
                         .collect();
@@ -2398,15 +2414,15 @@ impl App {
 
     fn handle_combat_target(&mut self, args: &str) {
         if args.is_empty() {
-            self.apply_command_result(CommandResult::Error(
-                "Usage: target <name>".to_string(),
-            ));
+            self.apply_command_result(CommandResult::Error("Usage: target <name>".to_string()));
             return;
         }
 
         // Verify character exists
         let exists = if let Some(gs) = &self.game_state {
-            gs.players.iter().chain(gs.npcs.iter())
+            gs.players
+                .iter()
+                .chain(gs.npcs.iter())
                 .any(|c| c.name.to_lowercase() == args.to_lowercase())
         } else {
             false
@@ -2414,13 +2430,17 @@ impl App {
 
         if !exists {
             // Check if combatant exists in tracker
-            let in_tracker = self.initiative_tracker.as_ref()
-                .map(|t| t.all().iter().any(|c| c.name.to_lowercase() == args.to_lowercase()))
+            let in_tracker = self
+                .initiative_tracker
+                .as_ref()
+                .map(|t| {
+                    t.all()
+                        .iter()
+                        .any(|c| c.name.to_lowercase() == args.to_lowercase())
+                })
                 .unwrap_or(false);
             if !in_tracker {
-                self.apply_command_result(CommandResult::Error(
-                    format!("'{args}' not found."),
-                ));
+                self.apply_command_result(CommandResult::Error(format!("'{args}' not found.")));
                 return;
             }
         }
@@ -2435,9 +2455,7 @@ impl App {
         let campaign_path = match &self.game_state {
             Some(gs) => gs.campaign_path.clone(),
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -2456,30 +2474,28 @@ impl App {
         let subcmd = parts[0];
 
         match subcmd {
-            "list" => {
-                match crate::notes::writer::list_today(&campaign_path) {
-                    Some(content) => {
-                        let lines: Vec<StyledLine> = content
-                            .lines()
-                            .map(|l| StyledLine::new(l.to_string(), Style::default().fg(Color::Blue)))
-                            .collect();
-                        if lines.is_empty() {
-                            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                                "No notes for today.".to_string(),
-                                Style::default().fg(Color::Yellow),
-                            )]));
-                        } else {
-                            self.apply_command_result(CommandResult::Output(lines));
-                        }
-                    }
-                    None => {
+            "list" => match crate::notes::writer::list_today(&campaign_path) {
+                Some(content) => {
+                    let lines: Vec<StyledLine> = content
+                        .lines()
+                        .map(|l| StyledLine::new(l.to_string(), Style::default().fg(Color::Blue)))
+                        .collect();
+                    if lines.is_empty() {
                         self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
                             "No notes for today.".to_string(),
                             Style::default().fg(Color::Yellow),
                         )]));
+                    } else {
+                        self.apply_command_result(CommandResult::Output(lines));
                     }
                 }
-            }
+                None => {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        "No notes for today.".to_string(),
+                        Style::default().fg(Color::Yellow),
+                    )]));
+                }
+            },
             "history" => {
                 let files = crate::notes::writer::list_files(&campaign_path);
                 if files.is_empty() {
@@ -2521,9 +2537,9 @@ impl App {
                         )]));
                     }
                     Err(e) => {
-                        self.apply_command_result(CommandResult::Error(
-                            format!("Failed to write note: {e}"),
-                        ));
+                        self.apply_command_result(CommandResult::Error(format!(
+                            "Failed to write note: {e}"
+                        )));
                     }
                 }
             }
@@ -2534,9 +2550,7 @@ impl App {
         let pl = match &self.persistence {
             Some(pl) => pl,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "No campaign loaded.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
                 return;
             }
         };
@@ -2615,9 +2629,7 @@ impl App {
                 )]));
             }
             Err(e) => {
-                self.apply_command_result(CommandResult::Error(format!(
-                    "Cannot undo: {e}"
-                )));
+                self.apply_command_result(CommandResult::Error(format!("Cannot undo: {e}")));
             }
         }
     }
@@ -2626,9 +2638,7 @@ impl App {
         let hash = match self.redo_stack.pop() {
             Some(h) => h,
             None => {
-                self.apply_command_result(CommandResult::Error(
-                    "Nothing to redo.".to_string(),
-                ));
+                self.apply_command_result(CommandResult::Error("Nothing to redo.".to_string()));
                 return;
             }
         };
@@ -2658,9 +2668,7 @@ impl App {
                 )]));
             }
             Err(e) => {
-                self.apply_command_result(CommandResult::Error(format!(
-                    "Cannot redo: {e}"
-                )));
+                self.apply_command_result(CommandResult::Error(format!("Cannot redo: {e}")));
             }
         }
     }
@@ -2700,7 +2708,7 @@ impl App {
             match crate::rules::loader::load_rules(&system_toml) {
                 Ok((_, schema)) => {
                     lines.push(StyledLine::new(
-                        format!("  \u{2713} rules/system.toml — valid"),
+                        "  \u{2713} rules/system.toml — valid".to_string(),
                         Style::default().fg(Color::Green),
                     ));
                     pass_count += 1;
@@ -2789,6 +2797,7 @@ impl App {
         self.apply_command_result(CommandResult::Output(lines));
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn validate_character_dir(
         &self,
         dir: &Path,
@@ -2825,7 +2834,9 @@ impl App {
                         }
                         Err(errors) => {
                             lines.push(StyledLine::new(
-                                format!("  \u{2717} {dir_name}/{name}/sheet.csv — validation failed"),
+                                format!(
+                                    "  \u{2717} {dir_name}/{name}/sheet.csv — validation failed"
+                                ),
                                 Style::default().fg(Color::Red),
                             ));
                             for e in errors {
@@ -3900,11 +3911,7 @@ mod tests {
         .unwrap();
         let player_dir = campaign_dir.join("players/thorin");
         std::fs::create_dir_all(&player_dir).unwrap();
-        std::fs::write(
-            player_dir.join("sheet.csv"),
-            "name,strength\nThorin,18\n",
-        )
-        .unwrap();
+        std::fs::write(player_dir.join("sheet.csv"), "name,strength\nThorin,18\n").unwrap();
         std::fs::write(
             campaign_dir.join("rules/commands/showstr.lol"),
             "HAI 1.2\nI IZ RUSTORY_GET_PLAYER YR \"Thorin\" MKAY\nI HAS A STR ITZ I IZ RUSTORY_GET_STAT YR \"strength\" MKAY\nVISIBLE STR\nKTHXBYE\n",
@@ -3952,7 +3959,9 @@ mod tests {
         let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
         // Built-in help should win
         assert!(
-            output_texts.iter().any(|t| t.contains("Available commands")),
+            output_texts
+                .iter()
+                .any(|t| t.contains("Available commands")),
             "Built-in help should win over custom. Messages: {output_texts:?}"
         );
         assert!(
@@ -4156,7 +4165,10 @@ mod tests {
         assert!(app.mode == Mode::Map, "map command should enable map mode");
 
         app.dispatch_command("map");
-        assert!(app.mode == Mode::Default, "map command again should disable map mode");
+        assert!(
+            app.mode == Mode::Default,
+            "map command again should disable map mode"
+        );
     }
 
     #[test]
@@ -4289,12 +4301,19 @@ mod tests {
 
         let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
         assert!(
-            output_texts.iter().any(|t| t.contains("moved") && t.contains("Silverport")),
+            output_texts
+                .iter()
+                .any(|t| t.contains("moved") && t.contains("Silverport")),
             "Should confirm move. Messages: {output_texts:?}"
         );
 
         // Verify location is set
-        let thorin = app.game_state.as_ref().unwrap().get_player("Thorin").unwrap();
+        let thorin = app
+            .game_state
+            .as_ref()
+            .unwrap()
+            .get_player("Thorin")
+            .unwrap();
         assert_eq!(thorin.location.as_deref(), Some("Silverport"));
     }
 
@@ -4325,7 +4344,9 @@ mod tests {
 
         let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
         assert!(
-            output_texts.iter().any(|t| t.contains("not found on the map")),
+            output_texts
+                .iter()
+                .any(|t| t.contains("not found on the map")),
             "Should reject invalid location. Messages: {output_texts:?}"
         );
     }
@@ -4348,11 +4369,9 @@ mod tests {
         app.running = true;
         app.mode = Mode::Map;
         let json = r##"{"pack": {}}"##;
-        app.world_map = Some(
-            crate::map::world::WorldMap::from_parsed(
-                crate::map::azgaar::parse_azgaar_json(json).unwrap(),
-            ),
-        );
+        app.world_map = Some(crate::map::world::WorldMap::from_parsed(
+            crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+        ));
 
         let initial_x = app.map_viewport.offset_x;
         let initial_y = app.map_viewport.offset_y;
@@ -4381,7 +4400,10 @@ mod tests {
             app.mode == Mode::Default,
             "Esc in map mode should exit map mode, not quit"
         );
-        assert!(app.running, "App should still be running after Esc in map mode");
+        assert!(
+            app.running,
+            "App should still be running after Esc in map mode"
+        );
     }
 
     #[test]
@@ -4410,7 +4432,9 @@ mod tests {
 
         let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
         assert!(
-            output_texts.iter().any(|t| t.contains("No campaign loaded")),
+            output_texts
+                .iter()
+                .any(|t| t.contains("No campaign loaded")),
             "Search without campaign should show error. Messages: {output_texts:?}"
         );
     }
@@ -4518,11 +4542,29 @@ mod tests {
 
         app.dispatch_command("sound");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Sound library"), "Should show library header. Got: {output}");
-        assert!(output.contains("ambiance"), "Should list ambiance dir. Got: {output}");
-        assert!(output.contains("combat"), "Should list combat dir. Got: {output}");
-        assert!(output.contains("theme.flac"), "Should list root file. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Sound library"),
+            "Should show library header. Got: {output}"
+        );
+        assert!(
+            output.contains("ambiance"),
+            "Should list ambiance dir. Got: {output}"
+        );
+        assert!(
+            output.contains("combat"),
+            "Should list combat dir. Got: {output}"
+        );
+        assert!(
+            output.contains("theme.flac"),
+            "Should list root file. Got: {output}"
+        );
     }
 
     #[test]
@@ -4536,9 +4578,21 @@ mod tests {
 
         app.dispatch_command("sound list ambiance");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("tavern.mp3"), "Should list tavern. Got: {output}");
-        assert!(output.contains("forest.ogg"), "Should list forest. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("tavern.mp3"),
+            "Should list tavern. Got: {output}"
+        );
+        assert!(
+            output.contains("forest.ogg"),
+            "Should list forest. Got: {output}"
+        );
     }
 
     #[test]
@@ -4559,8 +4613,17 @@ mod tests {
 
         app.dispatch_command("sound");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("empty"), "Should report empty library. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("empty"),
+            "Should report empty library. Got: {output}"
+        );
     }
 
     #[test]
@@ -4574,8 +4637,17 @@ mod tests {
 
         app.dispatch_command("sound search tavern");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("tavern.mp3"), "Should find tavern.mp3. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("tavern.mp3"),
+            "Should find tavern.mp3. Got: {output}"
+        );
     }
 
     #[test]
@@ -4589,8 +4661,17 @@ mod tests {
 
         app.dispatch_command("sound search nonexistent");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No audio files"), "Should report no matches. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No audio files"),
+            "Should report no matches. Got: {output}"
+        );
     }
 
     #[test]
@@ -4604,8 +4685,17 @@ mod tests {
 
         app.dispatch_command("sound play nonexistent.mp3");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("not found"), "Should report file not found. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should report file not found. Got: {output}"
+        );
     }
 
     #[test]
@@ -4614,7 +4704,13 @@ mod tests {
         app.running = true;
         app.dispatch_command("sound play");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -4627,7 +4723,13 @@ mod tests {
         // If audio device available, it should set volume
         app.dispatch_command("sound volume 50");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
             output.contains("Volume set to 50%") || output.contains("Audio device"),
             "Should set volume or report no device. Got: {output}"
@@ -4640,8 +4742,17 @@ mod tests {
         app.running = true;
         app.dispatch_command("sound volume abc");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Invalid volume"), "Should report invalid volume. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Invalid volume"),
+            "Should report invalid volume. Got: {output}"
+        );
     }
 
     #[test]
@@ -4650,7 +4761,13 @@ mod tests {
         app.running = true;
         app.dispatch_command("sound volume");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -4660,7 +4777,13 @@ mod tests {
         app.running = true;
         app.dispatch_command("sound status");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         // Either shows "No track loaded" or "Audio device not available"
         assert!(
             output.contains("No track loaded") || output.contains("Audio device"),
@@ -4674,7 +4797,13 @@ mod tests {
         app.running = true;
         app.dispatch_command("sound stop");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
             output.contains("stopped") || output.contains("Audio device"),
             "Should stop or report no device. Got: {output}"
@@ -4687,8 +4816,17 @@ mod tests {
         app.running = true;
         app.dispatch_command("sound foobar");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Unknown sound subcommand"), "Should report unknown subcommand. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Unknown sound subcommand"),
+            "Should report unknown subcommand. Got: {output}"
+        );
     }
 
     #[test]
@@ -4697,7 +4835,13 @@ mod tests {
         app.running = true;
         app.dispatch_command("sound loop");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -4707,7 +4851,13 @@ mod tests {
         app.running = true;
         app.dispatch_command("sound search");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -4717,8 +4867,17 @@ mod tests {
         app.running = true;
         app.dispatch_command("help");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("sound"), "Help should mention sound command. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("sound"),
+            "Help should mention sound command. Got: {output}"
+        );
     }
 
     #[test]
@@ -4754,8 +4913,14 @@ mod tests {
         app.load_campaign(&campaign);
 
         // .git/ should be created
-        assert!(campaign.join(".git").exists(), ".git/ should be created on load");
-        assert!(app.persistence.is_some(), "Persistence layer should be initialized");
+        assert!(
+            campaign.join(".git").exists(),
+            ".git/ should be created on load"
+        );
+        assert!(
+            app.persistence.is_some(),
+            "Persistence layer should be initialized"
+        );
     }
 
     #[test]
@@ -4788,8 +4953,17 @@ mod tests {
         app.running = true;
         app.dispatch_command("undo");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No campaign") || output.contains("Cannot"), "Should error. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No campaign") || output.contains("Cannot"),
+            "Should error. Got: {output}"
+        );
     }
 
     #[test]
@@ -4798,8 +4972,17 @@ mod tests {
         app.running = true;
         app.dispatch_command("redo");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Nothing to redo"), "Should report nothing to redo. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Nothing to redo"),
+            "Should report nothing to redo. Got: {output}"
+        );
     }
 
     #[test]
@@ -4828,14 +5011,24 @@ mod tests {
             let schema = app.game_state.as_ref().unwrap().schema.as_ref().unwrap();
             let mut ch = crate::game_state::Character::new("Hero");
             ch.stats = vec![crate::game_state::primitives::Stat::new("strength", 20.0)];
-            pl.persist_character(&ch, true, schema, "Strength to 20").unwrap();
+            pl.persist_character(&ch, true, schema, "Strength to 20")
+                .unwrap();
         }
         app.messages.clear();
 
         // Undo
         app.dispatch_command("undo");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Undo") || output.contains("reverted"), "Should undo. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Undo") || output.contains("reverted"),
+            "Should undo. Got: {output}"
+        );
 
         // Verify redo stack has an entry
         assert_eq!(app.redo_stack.len(), 1);
@@ -4843,8 +5036,17 @@ mod tests {
         // Redo
         app.messages.clear();
         app.dispatch_command("redo");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Redo") || output.contains("re-applied"), "Should redo. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Redo") || output.contains("re-applied"),
+            "Should redo. Got: {output}"
+        );
 
         // Redo stack should be empty now
         assert!(app.redo_stack.is_empty());
@@ -4858,7 +5060,10 @@ mod tests {
 
         // Any non-undo/redo command should clear redo stack
         app.dispatch_command("help");
-        assert!(app.redo_stack.is_empty(), "Redo stack should be cleared after a regular command");
+        assert!(
+            app.redo_stack.is_empty(),
+            "Redo stack should be cleared after a regular command"
+        );
     }
 
     // --- Show/Set/List command tests ---
@@ -4887,8 +5092,17 @@ mod tests {
 
         app.dispatch_command("show thorin");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Thorin"), "Should show character name. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Thorin"),
+            "Should show character name. Got: {output}"
+        );
         assert!(output.contains("18"), "Should show strength. Got: {output}");
     }
 
@@ -4916,8 +5130,17 @@ mod tests {
 
         app.dispatch_command("show hero strength");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("15"), "Should show strength value. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("15"),
+            "Should show strength value. Got: {output}"
+        );
     }
 
     #[test]
@@ -4938,8 +5161,17 @@ mod tests {
 
         app.dispatch_command("show nobody");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("not found"), "Should report not found. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should report not found. Got: {output}"
+        );
     }
 
     #[test]
@@ -4966,12 +5198,26 @@ mod tests {
 
         app.dispatch_command("set hero.strength 20");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("20"), "Should show new value. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("20"),
+            "Should show new value. Got: {output}"
+        );
 
         // Verify the stat was actually changed
         assert_eq!(
-            app.game_state.as_ref().unwrap().get_player("Hero").unwrap().get_stat("strength"),
+            app.game_state
+                .as_ref()
+                .unwrap()
+                .get_player("Hero")
+                .unwrap()
+                .get_stat("strength"),
             Some(20.0)
         );
     }
@@ -5000,8 +5246,17 @@ mod tests {
 
         app.dispatch_command("set hero.charisma 10");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("not found"), "Should report field not found. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should report field not found. Got: {output}"
+        );
     }
 
     #[test]
@@ -5028,7 +5283,13 @@ mod tests {
 
         app.dispatch_command("list players");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Hero"), "Should list Hero. Got: {output}");
     }
 
@@ -5050,8 +5311,17 @@ mod tests {
 
         app.dispatch_command("list npcs");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No NPCs"), "Should report no NPCs. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No NPCs"),
+            "Should report no NPCs. Got: {output}"
+        );
     }
 
     // --- History command tests ---
@@ -5062,8 +5332,17 @@ mod tests {
         app.running = true;
         app.dispatch_command("history");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No campaign"), "Should report no campaign. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No campaign"),
+            "Should report no campaign. Got: {output}"
+        );
     }
 
     #[test]
@@ -5084,8 +5363,17 @@ mod tests {
 
         app.dispatch_command("history");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Initial state"), "Should show initial commit. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Initial state"),
+            "Should show initial commit. Got: {output}"
+        );
     }
 
     // --- Validate command tests ---
@@ -5111,9 +5399,21 @@ mod tests {
         app.running = true;
         app.dispatch_command(&format!("validate {}", campaign.display()));
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("\u{2713}"), "Should have pass marks. Got: {output}");
-        assert!(output.contains("0 failed"), "Should have 0 failures. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("\u{2713}"),
+            "Should have pass marks. Got: {output}"
+        );
+        assert!(
+            output.contains("0 failed"),
+            "Should have 0 failures. Got: {output}"
+        );
     }
 
     #[test]
@@ -5138,9 +5438,21 @@ mod tests {
         app.running = true;
         app.dispatch_command(&format!("validate {}", campaign.display()));
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("\u{2717}"), "Should have fail marks. Got: {output}");
-        assert!(!output.contains("0 failed"), "Should have >0 failures. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("\u{2717}"),
+            "Should have fail marks. Got: {output}"
+        );
+        assert!(
+            !output.contains("0 failed"),
+            "Should have >0 failures. Got: {output}"
+        );
     }
 
     #[test]
@@ -5149,8 +5461,17 @@ mod tests {
         app.running = true;
         app.dispatch_command("validate");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No campaign loaded") || output.contains("Usage"), "Should report error. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No campaign loaded") || output.contains("Usage"),
+            "Should report error. Got: {output}"
+        );
     }
 
     #[test]
@@ -5172,8 +5493,17 @@ mod tests {
         // validate without args uses loaded campaign
         app.dispatch_command("validate");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Validating"), "Should validate loaded campaign. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Validating"),
+            "Should validate loaded campaign. Got: {output}"
+        );
     }
 
     #[test]
@@ -5221,8 +5551,17 @@ mod tests {
         app.running = true;
         app.dispatch_command("bestiary");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No campaign"), "Should report no campaign. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No campaign"),
+            "Should report no campaign. Got: {output}"
+        );
     }
 
     #[test]
@@ -5243,8 +5582,17 @@ mod tests {
 
         app.dispatch_command("bestiary");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No creature templates"), "Should report empty bestiary. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No creature templates"),
+            "Should report empty bestiary. Got: {output}"
+        );
     }
 
     #[test]
@@ -5276,11 +5624,26 @@ mod tests {
 
         app.dispatch_command("bestiary list");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Goblin"), "Should list Goblin. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Goblin"),
+            "Should list Goblin. Got: {output}"
+        );
         assert!(output.contains("Orc"), "Should list Orc. Got: {output}");
-        assert!(output.contains("HP: 7"), "Should show Goblin HP. Got: {output}");
-        assert!(output.contains("AC: 15"), "Should show Goblin AC. Got: {output}");
+        assert!(
+            output.contains("HP: 7"),
+            "Should show Goblin HP. Got: {output}"
+        );
+        assert!(
+            output.contains("AC: 15"),
+            "Should show Goblin AC. Got: {output}"
+        );
     }
 
     #[test]
@@ -5307,12 +5670,33 @@ mod tests {
 
         app.dispatch_command("bestiary info goblin");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Goblin"), "Should show creature name. Got: {output}");
-        assert!(output.contains("strength"), "Should show strength stat. Got: {output}");
-        assert!(output.contains("8"), "Should show strength value. Got: {output}");
-        assert!(output.contains("hp_max"), "Should show hp_max stat. Got: {output}");
-        assert!(output.contains("7"), "Should show hp_max value. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Goblin"),
+            "Should show creature name. Got: {output}"
+        );
+        assert!(
+            output.contains("strength"),
+            "Should show strength stat. Got: {output}"
+        );
+        assert!(
+            output.contains("8"),
+            "Should show strength value. Got: {output}"
+        );
+        assert!(
+            output.contains("hp_max"),
+            "Should show hp_max stat. Got: {output}"
+        );
+        assert!(
+            output.contains("7"),
+            "Should show hp_max value. Got: {output}"
+        );
     }
 
     #[test]
@@ -5339,8 +5723,17 @@ mod tests {
 
         app.dispatch_command("bestiary info GOBLIN");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Goblin"), "Should find Goblin case-insensitively. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Goblin"),
+            "Should find Goblin case-insensitively. Got: {output}"
+        );
     }
 
     #[test]
@@ -5362,8 +5755,17 @@ mod tests {
 
         app.dispatch_command("bestiary info dragon");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("not found"), "Should report not found. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should report not found. Got: {output}"
+        );
     }
 
     #[test]
@@ -5384,7 +5786,13 @@ mod tests {
 
         app.dispatch_command("bestiary info");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -5406,8 +5814,17 @@ mod tests {
 
         app.dispatch_command("bestiary foo");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Unknown bestiary subcommand"), "Should report unknown subcommand. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Unknown bestiary subcommand"),
+            "Should report unknown subcommand. Got: {output}"
+        );
     }
 
     // --- Spawn command tests ---
@@ -5442,8 +5859,17 @@ mod tests {
 
         app.dispatch_command("spawn goblin Guard");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Spawned Guard"), "Should confirm spawn. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Spawned Guard"),
+            "Should confirm spawn. Got: {output}"
+        );
 
         let gs = app.game_state().unwrap();
         let npc = gs.get_npc("Guard").expect("Guard NPC should exist");
@@ -5451,7 +5877,10 @@ mod tests {
         assert_eq!(npc.get_stat("hp_max"), Some(7.0));
         assert_eq!(npc.get_stat("ac"), Some(15.0));
         // Resource def should create hp gauge
-        assert!(npc.gauges.contains_key("hp"), "HP gauge should be created from resource_defs");
+        assert!(
+            npc.gauges.contains_key("hp"),
+            "HP gauge should be created from resource_defs"
+        );
         assert_eq!(npc.gauges["hp"].max, 7.0);
         assert_eq!(npc.gauges["hp"].current, 7.0);
     }
@@ -5486,8 +5915,17 @@ mod tests {
 
         app.dispatch_command("spawn dragon");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("not found"), "Should report template not found. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should report template not found. Got: {output}"
+        );
     }
 
     #[test]
@@ -5497,8 +5935,17 @@ mod tests {
 
         app.dispatch_command("spawn goblin");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No campaign loaded"), "Should report no campaign. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No campaign loaded"),
+            "Should report no campaign. Got: {output}"
+        );
     }
 
     #[test]
@@ -5512,7 +5959,13 @@ mod tests {
 
         app.dispatch_command("spawn");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -5564,12 +6017,20 @@ mod tests {
 
         let gs = app.game_state().unwrap();
         // Should have 3 goblins + 1 orc chieftain = 4 NPCs
-        assert_eq!(gs.npcs.len(), 4, "Should spawn 4 NPCs. Got: {:?}", gs.npcs.iter().map(|n| &n.name).collect::<Vec<_>>());
+        assert_eq!(
+            gs.npcs.len(),
+            4,
+            "Should spawn 4 NPCs. Got: {:?}",
+            gs.npcs.iter().map(|n| &n.name).collect::<Vec<_>>()
+        );
 
         assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
         assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
         assert!(gs.get_npc("Goblin #3").is_some(), "Goblin #3 should exist");
-        assert!(gs.get_npc("Orc Chieftain").is_some(), "Orc Chieftain should exist");
+        assert!(
+            gs.get_npc("Orc Chieftain").is_some(),
+            "Orc Chieftain should exist"
+        );
     }
 
     #[test]
@@ -5587,7 +6048,10 @@ mod tests {
         assert_eq!(goblin.get_stat("strength"), Some(8.0));
         assert_eq!(goblin.get_stat("hp_max"), Some(7.0));
         assert_eq!(goblin.get_stat("ac"), Some(15.0));
-        assert!(goblin.gauges.contains_key("hp"), "HP gauge should be created");
+        assert!(
+            goblin.gauges.contains_key("hp"),
+            "HP gauge should be created"
+        );
         assert_eq!(goblin.gauges["hp"].max, 7.0);
 
         let orc = gs.get_npc("Orc Chieftain").unwrap();
@@ -5609,10 +6073,25 @@ mod tests {
 
         app.dispatch_command("encounter goblin patrol");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Goblin Patrol"), "Should show encounter name. Got: {output}");
-        assert!(output.contains("4 creature(s)"), "Should show count. Got: {output}");
-        assert!(output.contains("A small group of goblins"), "Should show description. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Goblin Patrol"),
+            "Should show encounter name. Got: {output}"
+        );
+        assert!(
+            output.contains("4 creature(s)"),
+            "Should show count. Got: {output}"
+        );
+        assert!(
+            output.contains("A small group of goblins"),
+            "Should show description. Got: {output}"
+        );
     }
 
     #[test]
@@ -5626,8 +6105,17 @@ mod tests {
 
         app.dispatch_command("encounter dragon horde");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("not found"), "Should report not found. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should report not found. Got: {output}"
+        );
     }
 
     #[test]
@@ -5637,8 +6125,17 @@ mod tests {
 
         app.dispatch_command("encounter goblin patrol");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No campaign loaded"), "Should report no campaign. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No campaign loaded"),
+            "Should report no campaign. Got: {output}"
+        );
     }
 
     #[test]
@@ -5652,7 +6149,13 @@ mod tests {
 
         app.dispatch_command("encounter");
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -5691,12 +6194,25 @@ mod tests {
 
         let gs = app.game_state().unwrap();
         // Should still spawn the 2 goblins even though dragon template is missing
-        assert_eq!(gs.npcs.len(), 2, "Should spawn goblins despite missing dragon template");
+        assert_eq!(
+            gs.npcs.len(),
+            2,
+            "Should spawn goblins despite missing dragon template"
+        );
         assert!(gs.get_npc("Goblin #1").is_some());
         assert!(gs.get_npc("Goblin #2").is_some());
 
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("dragon"), "Should report missing template. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("dragon"),
+            "Should report missing template. Got: {output}"
+        );
     }
 
     // ---- Mode system tests ----
@@ -5764,14 +6280,19 @@ mod tests {
         std::fs::write(
             campaign.join("rules/system.toml"),
             "[system]\nname = \"Test\"\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut app = App::new();
         app.running = true;
         app.mode = Mode::Map;
 
         app.load_campaign(&campaign);
-        assert_eq!(app.mode, Mode::Default, "Loading campaign should reset mode to Default");
+        assert_eq!(
+            app.mode,
+            Mode::Default,
+            "Loading campaign should reset mode to Default"
+        );
     }
 
     // ---- Combat start/end tests ----
@@ -5783,7 +6304,10 @@ mod tests {
 
         app.dispatch_command("combat start");
         assert_eq!(app.mode, Mode::Combat);
-        assert!(app.initiative_tracker.is_some(), "Tracker should be created");
+        assert!(
+            app.initiative_tracker.is_some(),
+            "Tracker should be created"
+        );
     }
 
     #[test]
@@ -5807,7 +6331,10 @@ mod tests {
 
         app.dispatch_command("combat end");
         assert_eq!(app.mode, Mode::Default);
-        assert!(app.initiative_tracker.is_none(), "Tracker should be cleared");
+        assert!(
+            app.initiative_tracker.is_none(),
+            "Tracker should be cleared"
+        );
     }
 
     #[test]
@@ -5819,8 +6346,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("combat start");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Already in combat"), "Should show error. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Already in combat"),
+            "Should show error. Got: {output}"
+        );
     }
 
     #[test]
@@ -5829,8 +6365,17 @@ mod tests {
         app.running = true;
 
         app.dispatch_command("combat end");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Not in combat"), "Should show error. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Not in combat"),
+            "Should show error. Got: {output}"
+        );
     }
 
     #[test]
@@ -5839,8 +6384,17 @@ mod tests {
         app.running = true;
 
         app.dispatch_command("combat start");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Combat started"), "Should show start message. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Combat started"),
+            "Should show start message. Got: {output}"
+        );
     }
 
     // ---- Combat command tests ----
@@ -5853,8 +6407,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("init add Thorin 18");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Added Thorin"), "Should confirm add. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Added Thorin"),
+            "Should confirm add. Got: {output}"
+        );
 
         let tracker = app.initiative_tracker.as_ref().unwrap();
         assert_eq!(tracker.len(), 1);
@@ -5888,7 +6451,13 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("init add");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -5900,8 +6469,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("init add Thorin abc");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Invalid initiative"), "Should show error. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Invalid initiative"),
+            "Should show error. Got: {output}"
+        );
     }
 
     #[test]
@@ -5914,8 +6492,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("init remove Goblin");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Removed Goblin"), "Should confirm removal. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Removed Goblin"),
+            "Should confirm removal. Got: {output}"
+        );
 
         let tracker = app.initiative_tracker.as_ref().unwrap();
         assert_eq!(tracker.len(), 1);
@@ -5929,8 +6516,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("init remove Nobody");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("not found"), "Should show not found. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should show not found. Got: {output}"
+        );
     }
 
     #[test]
@@ -5943,9 +6539,21 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("next");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Goblin"), "Should advance to next combatant. Got: {output}");
-        assert!(output.contains(">>"), "Should show turn marker. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Goblin"),
+            "Should advance to next combatant. Got: {output}"
+        );
+        assert!(
+            output.contains(">>"),
+            "Should show turn marker. Got: {output}"
+        );
     }
 
     #[test]
@@ -5959,9 +6567,21 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("prev");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Thorin"), "Should go back to Thorin. Got: {output}");
-        assert!(output.contains("<<"), "Should show prev marker. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Thorin"),
+            "Should go back to Thorin. Got: {output}"
+        );
+        assert!(
+            output.contains("<<"),
+            "Should show prev marker. Got: {output}"
+        );
     }
 
     #[test]
@@ -5972,8 +6592,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("next");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No combatants"), "Should show error. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No combatants"),
+            "Should show error. Got: {output}"
+        );
     }
 
     #[test]
@@ -5986,11 +6615,29 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("status");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Initiative Order"), "Should show header. Got: {output}");
-        assert!(output.contains("Thorin"), "Should show Thorin. Got: {output}");
-        assert!(output.contains("Goblin"), "Should show Goblin. Got: {output}");
-        assert!(output.contains(">>"), "Should show current turn marker. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Initiative Order"),
+            "Should show header. Got: {output}"
+        );
+        assert!(
+            output.contains("Thorin"),
+            "Should show Thorin. Got: {output}"
+        );
+        assert!(
+            output.contains("Goblin"),
+            "Should show Goblin. Got: {output}"
+        );
+        assert!(
+            output.contains(">>"),
+            "Should show current turn marker. Got: {output}"
+        );
     }
 
     #[test]
@@ -6001,8 +6648,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("status");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No combatants"), "Should show empty message. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No combatants"),
+            "Should show empty message. Got: {output}"
+        );
     }
 
     #[test]
@@ -6016,11 +6672,20 @@ mod tests {
         std::fs::write(
             campaign.join("rules/system.toml"),
             "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::create_dir_all(campaign.join("players/thorin")).unwrap();
-        std::fs::write(campaign.join("players/thorin/sheet.csv"), "name,strength\nThorin,18\n").unwrap();
+        std::fs::write(
+            campaign.join("players/thorin/sheet.csv"),
+            "name,strength\nThorin,18\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(campaign.join("npc/goblin")).unwrap();
-        std::fs::write(campaign.join("npc/goblin/sheet.csv"), "name,strength\nGoblin,8\n").unwrap();
+        std::fs::write(
+            campaign.join("npc/goblin/sheet.csv"),
+            "name,strength\nGoblin,8\n",
+        )
+        .unwrap();
 
         let mut app = App::with_rng(Box::new(StdRng::seed_from_u64(42)));
         app.running = true;
@@ -6030,10 +6695,25 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("init roll");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Initiative rolled"), "Should show roll header. Got: {output}");
-        assert!(output.contains("Thorin"), "Should show Thorin's roll. Got: {output}");
-        assert!(output.contains("Goblin"), "Should show Goblin's roll. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Initiative rolled"),
+            "Should show roll header. Got: {output}"
+        );
+        assert!(
+            output.contains("Thorin"),
+            "Should show Thorin's roll. Got: {output}"
+        );
+        assert!(
+            output.contains("Goblin"),
+            "Should show Goblin's roll. Got: {output}"
+        );
 
         let tracker = app.initiative_tracker.as_ref().unwrap();
         assert_eq!(tracker.len(), 2, "Should have 2 combatants");
@@ -6047,9 +6727,14 @@ mod tests {
         std::fs::write(
             campaign.join("rules/system.toml"),
             "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::create_dir_all(campaign.join("npc/goblin")).unwrap();
-        std::fs::write(campaign.join("npc/goblin/sheet.csv"), "name,strength\nGoblin,8\n").unwrap();
+        std::fs::write(
+            campaign.join("npc/goblin/sheet.csv"),
+            "name,strength\nGoblin,8\n",
+        )
+        .unwrap();
 
         let mut app = App::new();
         app.running = true;
@@ -6057,8 +6742,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("target Goblin");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Target set to"), "Should confirm target. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Target set to"),
+            "Should confirm target. Got: {output}"
+        );
     }
 
     #[test]
@@ -6068,8 +6762,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("target Nobody");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("not found"), "Should show not found. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should show not found. Got: {output}"
+        );
     }
 
     #[test]
@@ -6079,8 +6782,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("init add Thorin 18");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Not in combat mode"), "Should show error. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Not in combat mode"),
+            "Should show error. Got: {output}"
+        );
     }
 
     // ---- Combat dashboard render tests ----
@@ -6090,7 +6802,9 @@ mod tests {
         use ratatui::Terminal;
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| crate::ui::render(frame, app)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::render(frame, app))
+            .unwrap();
         terminal.backend().buffer().clone()
     }
 
@@ -6108,9 +6822,18 @@ mod tests {
 
         let buf = render_app_to_buffer(&app, 80, 25);
         let content = buffer_content(&buf);
-        assert!(content.contains("Initiative"), "Should render Initiative panel. Content: {content}");
-        assert!(content.contains("Thorin"), "Should show Thorin in dashboard");
-        assert!(content.contains("Goblin"), "Should show Goblin in dashboard");
+        assert!(
+            content.contains("Initiative"),
+            "Should render Initiative panel. Content: {content}"
+        );
+        assert!(
+            content.contains("Thorin"),
+            "Should show Thorin in dashboard"
+        );
+        assert!(
+            content.contains("Goblin"),
+            "Should show Goblin in dashboard"
+        );
     }
 
     #[test]
@@ -6123,7 +6846,10 @@ mod tests {
 
         let buf = render_app_to_buffer(&app, 80, 25);
         let content = buffer_content(&buf);
-        assert!(content.contains(">>"), "Should show current turn marker. Content: {content}");
+        assert!(
+            content.contains(">>"),
+            "Should show current turn marker. Content: {content}"
+        );
     }
 
     #[test]
@@ -6140,15 +6866,23 @@ mod tests {
         // >> should appear before Thorin
         let marker_pos = content1.find(">>").expect("Should have >> marker");
         let thorin_pos = content1.find("Thorin").expect("Should have Thorin");
-        assert!(marker_pos < thorin_pos, ">> should be before Thorin (current)");
+        assert!(
+            marker_pos < thorin_pos,
+            ">> should be before Thorin (current)"
+        );
 
         // After next, Goblin is current
         app.dispatch_command("next");
         let buf2 = render_app_to_buffer(&app, 80, 25);
         let content2 = buffer_content(&buf2);
-        let marker_pos2 = content2.find(">>").expect("Should have >> marker after next");
+        let marker_pos2 = content2
+            .find(">>")
+            .expect("Should have >> marker after next");
         let goblin_pos = content2.find("Goblin").expect("Should have Goblin");
-        assert!(marker_pos2 < goblin_pos, ">> should be before Goblin (current) after next");
+        assert!(
+            marker_pos2 < goblin_pos,
+            ">> should be before Goblin (current) after next"
+        );
     }
 
     // ---- Note command tests ----
@@ -6159,7 +6893,8 @@ mod tests {
         std::fs::write(
             campaign.join("rules/system.toml"),
             "[system]\nname = \"NoteTest\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         campaign
     }
 
@@ -6168,8 +6903,17 @@ mod tests {
         let mut app = App::new();
         app.running = true;
         app.dispatch_command("note hello");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No campaign loaded"), "Should show error. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No campaign loaded"),
+            "Should show error. Got: {output}"
+        );
     }
 
     #[test]
@@ -6182,7 +6926,13 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("note");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
@@ -6196,8 +6946,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("note The party entered the cave");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("Note added"), "Should confirm note. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Note added"),
+            "Should confirm note. Got: {output}"
+        );
 
         // Verify file exists
         let notes_dir = campaign.join("notes");
@@ -6216,8 +6975,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("note list");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("party entered the cave"), "Should show note content. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("party entered the cave"),
+            "Should show note content. Got: {output}"
+        );
     }
 
     #[test]
@@ -6230,8 +6998,17 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("note list");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No notes"), "Should show no notes. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No notes"),
+            "Should show no notes. Got: {output}"
+        );
     }
 
     #[test]
@@ -6247,9 +7024,21 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("note history");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains(".md"), "Should show note file. Got: {output}");
-        assert!(output.contains("1 file"), "Should show file count. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains(".md"),
+            "Should show note file. Got: {output}"
+        );
+        assert!(
+            output.contains("1 file"),
+            "Should show file count. Got: {output}"
+        );
     }
 
     #[test]
@@ -6262,7 +7051,16 @@ mod tests {
         app.messages.clear();
 
         app.dispatch_command("note history");
-        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
-        assert!(output.contains("No session notes"), "Should show no notes. Got: {output}");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No session notes"),
+            "Should show no notes. Got: {output}"
+        );
     }
 }

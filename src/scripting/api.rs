@@ -710,10 +710,11 @@ impl ScriptContext {
         let template_name = value_to_string(&args[0]);
         let custom_name = args.get(1).map(value_to_string).filter(|s| !s.is_empty());
 
-        let entry = match crate::bestiary::find_entry(&self.game_state.bestiary_entries, &template_name) {
-            Some(e) => e.clone(),
-            None => return Value::Noob,
-        };
+        let entry =
+            match crate::bestiary::find_entry(&self.game_state.bestiary_entries, &template_name) {
+                Some(e) => e.clone(),
+                None => return Value::Noob,
+            };
 
         let npc_name = match custom_name {
             Some(name) => name,
@@ -758,7 +759,11 @@ impl ScriptContext {
                         if !character.pools.contains_key(name) {
                             character.pools.insert(
                                 name.clone(),
-                                crate::game_state::primitives::Pool::new(name, *max, resets_on.clone()),
+                                crate::game_state::primitives::Pool::new(
+                                    name,
+                                    *max,
+                                    resets_on.clone(),
+                                ),
                             );
                         }
                     }
@@ -768,7 +773,8 @@ impl ScriptContext {
 
         let result_name = npc_name.clone();
         self.game_state.add_npc(character);
-        self.output.push(format!("Spawned {result_name} from bestiary."));
+        self.output
+            .push(format!("Spawned {result_name} from bestiary."));
 
         Value::Yarn(result_name)
     }
@@ -835,7 +841,9 @@ impl ScriptContext {
                                     if max_val > 0.0 {
                                         character.gauges.insert(
                                             name.clone(),
-                                            crate::game_state::primitives::Gauge::new(name, max_val),
+                                            crate::game_state::primitives::Gauge::new(
+                                                name, max_val,
+                                            ),
                                         );
                                     }
                                 }
@@ -860,7 +868,8 @@ impl ScriptContext {
                     }
                 }
 
-                self.output.push(format!("Spawned {} from encounter.", npc_name));
+                self.output
+                    .push(format!("Spawned {npc_name} from encounter."));
                 self.game_state.add_npc(character);
                 spawned_count += 1;
             }
@@ -1521,7 +1530,10 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.rustory_play_sound(vec![Value::Yarn("tavern.mp3".to_string())]);
         assert_eq!(ctx.sound_commands.len(), 1);
-        assert_eq!(ctx.sound_commands[0], SoundCommand::Play("tavern.mp3".to_string()));
+        assert_eq!(
+            ctx.sound_commands[0],
+            SoundCommand::Play("tavern.mp3".to_string())
+        );
     }
 
     #[test]
@@ -1536,7 +1548,10 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.rustory_play_loop(vec![Value::Yarn("ambiance.ogg".to_string())]);
         assert_eq!(ctx.sound_commands.len(), 1);
-        assert_eq!(ctx.sound_commands[0], SoundCommand::PlayLoop("ambiance.ogg".to_string()));
+        assert_eq!(
+            ctx.sound_commands[0],
+            SoundCommand::PlayLoop("ambiance.ogg".to_string())
+        );
     }
 
     #[test]
@@ -1568,8 +1583,14 @@ mod tests {
         ctx.rustory_play_loop(vec![Value::Yarn("ambiance.ogg".to_string())]);
         ctx.rustory_stop_sound(vec![]);
         assert_eq!(ctx.sound_commands.len(), 3);
-        assert_eq!(ctx.sound_commands[0], SoundCommand::Play("battle.mp3".to_string()));
-        assert_eq!(ctx.sound_commands[1], SoundCommand::PlayLoop("ambiance.ogg".to_string()));
+        assert_eq!(
+            ctx.sound_commands[0],
+            SoundCommand::Play("battle.mp3".to_string())
+        );
+        assert_eq!(
+            ctx.sound_commands[1],
+            SoundCommand::PlayLoop("ambiance.ogg".to_string())
+        );
         assert_eq!(ctx.sound_commands[2], SoundCommand::Stop);
     }
 
@@ -1816,10 +1837,7 @@ KTHXBYE",
         let result = engine.execute(&source);
         assert!(result.is_ok(), "heal.lol failed: {:?}", result.err());
         let output = ctx.borrow().output.clone();
-        assert!(
-            !output.is_empty(),
-            "heal.lol should produce display output"
-        );
+        assert!(!output.is_empty(), "heal.lol should produce display output");
         assert!(
             output[0].contains("Heal") || output[0].contains("spell"),
             "heal output should mention healing or spell slots: {:?}",
@@ -1829,8 +1847,7 @@ KTHXBYE",
 
     #[test]
     fn test_sample_perception_executes_without_error() {
-        let source =
-            std::fs::read_to_string("sample/rules/commands/perception.lol").unwrap();
+        let source = std::fs::read_to_string("sample/rules/commands/perception.lol").unwrap();
         let ctx = Rc::new(RefCell::new(ScriptContext::new(
             make_sample_game_state(),
             Box::new(StdRng::seed_from_u64(42)),
@@ -1838,11 +1855,7 @@ KTHXBYE",
         let mut engine = ScriptEngine::new();
         ScriptContext::register_api(ctx.clone(), &mut engine);
         let result = engine.execute(&source);
-        assert!(
-            result.is_ok(),
-            "perception.lol failed: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "perception.lol failed: {:?}", result.err());
         let output = ctx.borrow().output.clone();
         assert!(
             !output.is_empty(),
@@ -1859,17 +1872,15 @@ KTHXBYE",
 
     fn make_game_state_with_bestiary() -> GameState {
         let mut gs = make_game_state_with_rules();
-        gs.bestiary_entries = vec![
-            crate::bestiary::BestiaryEntry {
-                name: "Goblin Warrior".to_string(),
-                stats: vec![
-                    crate::game_state::primitives::Stat::new("strength", 8.0),
-                    crate::game_state::primitives::Stat::new("dexterity", 14.0),
-                    crate::game_state::primitives::Stat::new("hp_max", 7.0),
-                    crate::game_state::primitives::Stat::new("ac", 15.0),
-                ],
-            },
-        ];
+        gs.bestiary_entries = vec![crate::bestiary::BestiaryEntry {
+            name: "Goblin Warrior".to_string(),
+            stats: vec![
+                crate::game_state::primitives::Stat::new("strength", 8.0),
+                crate::game_state::primitives::Stat::new("dexterity", 14.0),
+                crate::game_state::primitives::Stat::new("hp_max", 7.0),
+                crate::game_state::primitives::Stat::new("ac", 15.0),
+            ],
+        }];
         gs
     }
 

@@ -119,8 +119,7 @@ impl WorldMap {
 
             let start_to_from =
                 ((start.x - from_burg.x).powi(2) + (start.y - from_burg.y).powi(2)).sqrt();
-            let end_to_to =
-                ((end.x - to_burg.x).powi(2) + (end.y - to_burg.y).powi(2)).sqrt();
+            let end_to_to = ((end.x - to_burg.x).powi(2) + (end.y - to_burg.y).powi(2)).sqrt();
 
             let threshold = 50.0; // tolerance for matching route endpoints to burgs
             (start_to_from < threshold && end_to_to < threshold)

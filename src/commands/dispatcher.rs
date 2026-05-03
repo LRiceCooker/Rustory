@@ -107,18 +107,14 @@ pub fn dispatch(
         mapping::SEARCH => {
             CommandResult::Error("search command must be handled by the app".to_string())
         }
-        mapping::MAP => {
-            CommandResult::Error("map command must be handled by the app".to_string())
-        }
+        mapping::MAP => CommandResult::Error("map command must be handled by the app".to_string()),
         mapping::SOUND => {
             CommandResult::Error("sound command must be handled by the app".to_string())
         }
         mapping::SHOW => {
             CommandResult::Error("show command must be handled by the app".to_string())
         }
-        mapping::SET => {
-            CommandResult::Error("set command must be handled by the app".to_string())
-        }
+        mapping::SET => CommandResult::Error("set command must be handled by the app".to_string()),
         mapping::LIST => {
             CommandResult::Error("list command must be handled by the app".to_string())
         }
@@ -137,7 +133,11 @@ pub fn dispatch(
         mapping::BESTIARY => {
             CommandResult::Error("bestiary command must be handled by the app".to_string())
         }
-        mapping::COMBAT | mapping::INIT | mapping::NEXT | mapping::PREV | mapping::STATUS
+        mapping::COMBAT
+        | mapping::INIT
+        | mapping::NEXT
+        | mapping::PREV
+        | mapping::STATUS
         | mapping::TARGET => {
             CommandResult::Error("combat command must be handled by the app".to_string())
         }

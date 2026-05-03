@@ -348,7 +348,10 @@ mod tests {
             .collect();
 
         if let (Some(&last_dir), Some(&first_file)) = (dir_indices.last(), file_indices.first()) {
-            assert!(last_dir < first_file, "Directories should sort before files");
+            assert!(
+                last_dir < first_file,
+                "Directories should sort before files"
+            );
         }
     }
 }

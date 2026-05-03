@@ -39,10 +39,7 @@ pub fn commit(repo: &Repository, message: &str) -> color_eyre::Result<()> {
     let tree = repo.find_tree(tree_oid)?;
 
     // Check if HEAD exists (first commit has no parent)
-    let parent_commit = repo
-        .head()
-        .ok()
-        .and_then(|head| head.peel_to_commit().ok());
+    let parent_commit = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
 
     let parents: Vec<&git2::Commit<'_>> = match &parent_commit {
         Some(c) => vec![c],

@@ -191,14 +191,8 @@ mod tests {
         }
 
         assert_eq!(row.get("name").unwrap(), "Thorin");
-        assert_eq!(
-            row.get("strength").unwrap().parse::<f64>().unwrap(),
-            18.0
-        );
-        assert_eq!(
-            row.get("hp_max").unwrap().parse::<f64>().unwrap(),
-            52.0
-        );
+        assert_eq!(row.get("strength").unwrap().parse::<f64>().unwrap(), 18.0);
+        assert_eq!(row.get("hp_max").unwrap().parse::<f64>().unwrap(), 52.0);
     }
 
     #[test]

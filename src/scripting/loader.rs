@@ -40,13 +40,7 @@ pub fn load_custom_commands(campaign_path: &Path) -> HashMap<String, LolScript> 
             Ok(s) => s,
             Err(_) => continue,
         };
-        commands.insert(
-            name.clone(),
-            LolScript {
-                name,
-                source,
-            },
-        );
+        commands.insert(name.clone(), LolScript { name, source });
     }
 
     commands
@@ -169,11 +163,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let commands_dir = dir.path().join("rules").join("commands");
         fs::create_dir_all(&commands_dir).unwrap();
-        fs::write(
-            commands_dir.join("valid.lol"),
-            "HAI 1.2\nKTHXBYE",
-        )
-        .unwrap();
+        fs::write(commands_dir.join("valid.lol"), "HAI 1.2\nKTHXBYE").unwrap();
         // Create a subdirectory (should be ignored, not crash)
         fs::create_dir_all(commands_dir.join("subdir")).unwrap();
         let commands = load_custom_commands(dir.path());

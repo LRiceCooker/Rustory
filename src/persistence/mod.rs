@@ -108,10 +108,7 @@ impl PersistenceLayer {
             self.campaign_path.join("npc")
         };
         // Use lowercase name with spaces replaced by underscores
-        let folder_name = character
-            .name
-            .to_lowercase()
-            .replace(' ', "_");
+        let folder_name = character.name.to_lowercase().replace(' ', "_");
         base.join(folder_name)
     }
 }
@@ -270,9 +267,6 @@ mod tests {
 
         // CSV should be back to 52
         let csv = std::fs::read_to_string(dir.path().join("players/thorin/sheet.csv")).unwrap();
-        assert!(
-            csv.contains("52"),
-            "HP should be reverted to 52: {csv}"
-        );
+        assert!(csv.contains("52"), "HP should be reverted to 52: {csv}");
     }
 }

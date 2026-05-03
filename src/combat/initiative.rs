@@ -55,8 +55,11 @@ impl InitiativeTracker {
         for c in &mut self.combatants {
             c.is_current = false;
         }
-        self.combatants
-            .sort_by(|a, b| b.initiative.partial_cmp(&a.initiative).unwrap_or(std::cmp::Ordering::Equal));
+        self.combatants.sort_by(|a, b| {
+            b.initiative
+                .partial_cmp(&a.initiative)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         self.current_index = 0;
         if !self.combatants.is_empty() {
             self.combatants[0].is_current = true;
@@ -64,6 +67,7 @@ impl InitiativeTracker {
     }
 
     /// Advance to the next combatant's turn. Wraps around.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&Combatant> {
         if self.combatants.is_empty() {
             return None;

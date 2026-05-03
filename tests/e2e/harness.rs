@@ -1103,7 +1103,10 @@ KTHXBYE",
         // Verify Goblin starts at full HP (7)
         let gs = harness.game_state().expect("game state loaded");
         let goblin = gs.get_npc("Goblin").expect("Goblin should exist");
-        let initial_hp = goblin.get_gauge("hp").expect("hp gauge should exist").current;
+        let initial_hp = goblin
+            .get_gauge("hp")
+            .expect("hp gauge should exist")
+            .current;
         assert_eq!(initial_hp, 7.0, "Goblin should start at 7 HP");
 
         // Execute smite (the dnd_basic fixture has smite.lol)
@@ -1299,7 +1302,10 @@ KTHXBYE",
         let mut harness = TestHarness::from_campaign(&campaign);
         harness.execute("map");
 
-        assert!(harness.app.mode == rustory::app::Mode::Map, "Should be in map mode");
+        assert!(
+            harness.app.mode == rustory::app::Mode::Map,
+            "Should be in map mode"
+        );
 
         let buf = harness.render(80, 25);
         assert!(
@@ -1480,8 +1486,7 @@ KTHXBYE",
 
     #[test]
     fn test_e2e_sound_empty_library() {
-        let campaign = TestCampaign::new()
-            .with_system_toml("[system]\nname = \"NoSound\"\n");
+        let campaign = TestCampaign::new().with_system_toml("[system]\nname = \"NoSound\"\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
         harness.execute("sound");
@@ -1519,8 +1524,14 @@ KTHXBYE",
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(all_output.contains("Thorin"), "Should show name. Output: {all_output}");
-        assert!(all_output.contains("18"), "Should show strength. Output: {all_output}");
+        assert!(
+            all_output.contains("Thorin"),
+            "Should show name. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("18"),
+            "Should show strength. Output: {all_output}"
+        );
     }
 
     #[test]
@@ -1540,7 +1551,10 @@ KTHXBYE",
             .map(|m| m.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(set_output.contains("20"), "Set should show new value. Output: {set_output}");
+        assert!(
+            set_output.contains("20"),
+            "Set should show new value. Output: {set_output}"
+        );
 
         // Verify with show
         harness.execute("show hero strength");
@@ -1550,7 +1564,10 @@ KTHXBYE",
             .map(|m| m.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(show_output.contains("20"), "Show should confirm change. Output: {show_output}");
+        assert!(
+            show_output.contains("20"),
+            "Show should confirm change. Output: {show_output}"
+        );
     }
 
     #[test]
@@ -1572,16 +1589,21 @@ KTHXBYE",
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(all_output.contains("Thorin"), "Should list Thorin. Output: {all_output}");
-        assert!(all_output.contains("Elara"), "Should list Elara. Output: {all_output}");
+        assert!(
+            all_output.contains("Thorin"),
+            "Should list Thorin. Output: {all_output}"
+        );
+        assert!(
+            all_output.contains("Elara"),
+            "Should list Elara. Output: {all_output}"
+        );
     }
 
     // ---- Persistence E2E tests ----
 
     #[test]
     fn test_e2e_history_shows_initial_commit() {
-        let campaign = TestCampaign::new()
-            .with_system_toml("[system]\nname = \"PersistTest\"\n");
+        let campaign = TestCampaign::new().with_system_toml("[system]\nname = \"PersistTest\"\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
         harness.execute("history");
@@ -1629,8 +1651,7 @@ KTHXBYE",
 
     #[test]
     fn test_e2e_undo_no_changes() {
-        let campaign = TestCampaign::new()
-            .with_system_toml("[system]\nname = \"UndoTest\"\n");
+        let campaign = TestCampaign::new().with_system_toml("[system]\nname = \"UndoTest\"\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
         harness.execute("undo");
@@ -1651,8 +1672,7 @@ KTHXBYE",
 
     #[test]
     fn test_e2e_redo_nothing() {
-        let campaign = TestCampaign::new()
-            .with_system_toml("[system]\nname = \"RedoTest\"\n");
+        let campaign = TestCampaign::new().with_system_toml("[system]\nname = \"RedoTest\"\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
         harness.execute("redo");
@@ -1764,7 +1784,10 @@ KTHXBYE",
         harness.execute("spawn goblin Grunt");
 
         let gs = harness.game_state().expect("game state should exist");
-        assert!(gs.get_npc("Grunt").is_some(), "Grunt should exist in game state");
+        assert!(
+            gs.get_npc("Grunt").is_some(),
+            "Grunt should exist in game state"
+        );
 
         harness.execute("show Grunt");
 
@@ -1813,13 +1836,20 @@ KTHXBYE",
 
         // Verify all 4 NPCs created in game state
         let gs = harness.game_state().expect("game state should exist");
-        assert_eq!(gs.npcs.len(), 4, "Should have 4 NPCs. Got: {:?}",
-            gs.npcs.iter().map(|n| &n.name).collect::<Vec<_>>());
+        assert_eq!(
+            gs.npcs.len(),
+            4,
+            "Should have 4 NPCs. Got: {:?}",
+            gs.npcs.iter().map(|n| &n.name).collect::<Vec<_>>()
+        );
 
         assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
         assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
         assert!(gs.get_npc("Goblin #3").is_some(), "Goblin #3 should exist");
-        assert!(gs.get_npc("Orc Chieftain").is_some(), "Orc Chieftain should exist");
+        assert!(
+            gs.get_npc("Orc Chieftain").is_some(),
+            "Orc Chieftain should exist"
+        );
 
         // Verify stats are correct
         let goblin = gs.get_npc("Goblin #1").unwrap();
@@ -1874,8 +1904,12 @@ KTHXBYE",
 
         // Verify Goblin starts at full HP
         let gs = harness.game_state().unwrap();
-        let initial_hp = gs.get_npc("Goblin").unwrap()
-            .get_gauge("hp").unwrap().current;
+        let initial_hp = gs
+            .get_npc("Goblin")
+            .unwrap()
+            .get_gauge("hp")
+            .unwrap()
+            .current;
         assert_eq!(initial_hp, 7.0);
 
         // Start combat
@@ -1906,8 +1940,12 @@ KTHXBYE",
             "Status should show Goblin. Output: {status_output}"
         );
         // Thorin should be first (higher initiative)
-        let thorin_pos = status_output.rfind("1. Thorin").or(status_output.rfind("Thorin"));
-        let goblin_pos = status_output.rfind("2. Goblin").or(status_output.rfind("Goblin"));
+        let thorin_pos = status_output
+            .rfind("1. Thorin")
+            .or(status_output.rfind("Thorin"));
+        let goblin_pos = status_output
+            .rfind("2. Goblin")
+            .or(status_output.rfind("Goblin"));
         assert!(
             thorin_pos.is_some() && goblin_pos.is_some(),
             "Both should be in status output"
@@ -1962,8 +2000,7 @@ KTHXBYE",
 
     #[test]
     fn test_e2e_note_add_and_list() {
-        let campaign = TestCampaign::new()
-            .with_system_toml("[system]\nname = \"NoteTest\"\n");
+        let campaign = TestCampaign::new().with_system_toml("[system]\nname = \"NoteTest\"\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
 
@@ -2039,28 +2076,54 @@ success = \"result >= dc\"
 
         // 2. Show character
         harness.execute("show thorin");
-        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        let out: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(out.contains("Thorin"), "show should display Thorin");
 
         // 3. Set a stat
         harness.execute("set thorin.strength 20");
         let gs = harness.game_state().unwrap();
-        assert_eq!(gs.get_player("Thorin").unwrap().get_stat("strength"), Some(20.0));
+        assert_eq!(
+            gs.get_player("Thorin").unwrap().get_stat("strength"),
+            Some(20.0)
+        );
 
         // 4. Roll dice
         harness.execute("roll 1d20");
-        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        let out: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(out.contains("result:"), "roll should show result");
 
         // 5. Help command
         harness.execute("help");
-        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        let out: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(out.contains("Available commands"), "help should work");
 
         // 6. Search (finds lore)
         harness.execute("search caves");
-        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
-        assert!(out.contains("cave") || out.contains("lurks"), "search should find lore content");
+        let out: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            out.contains("cave") || out.contains("lurks"),
+            "search should find lore content"
+        );
 
         // 7. Spawn from bestiary
         harness.execute("spawn orc");
@@ -2070,7 +2133,10 @@ success = \"result >= dc\"
         // 8. Encounter
         harness.execute("encounter orc ambush");
         let gs = harness.game_state().unwrap();
-        assert!(gs.get_npc("Orc #2").is_some(), "encounter should create Orc #2");
+        assert!(
+            gs.get_npc("Orc #2").is_some(),
+            "encounter should create Orc #2"
+        );
 
         // 9. Combat mode
         harness.execute("combat start");
@@ -2081,8 +2147,16 @@ success = \"result >= dc\"
 
         // 10. Status shows combatants
         harness.execute("status");
-        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
-        assert!(out.contains("Thorin") && out.contains("Goblin"), "status should show combatants");
+        let out: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            out.contains("Thorin") && out.contains("Goblin"),
+            "status should show combatants"
+        );
 
         // 11. Next advances turn
         harness.execute("next");
@@ -2094,31 +2168,58 @@ success = \"result >= dc\"
         // 13. Add note
         harness.execute("note The smoke test passed");
         harness.execute("note list");
-        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
-        assert!(out.contains("smoke test passed"), "note list should show note");
+        let out: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            out.contains("smoke test passed"),
+            "note list should show note"
+        );
 
         // 14. List players/npcs
         harness.execute("list players");
-        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        let out: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(out.contains("Thorin"), "list should show Thorin");
 
         harness.execute("list npcs");
-        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        let out: String = harness
+            .output_history()
+            .iter()
+            .map(|m| m.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(out.contains("Goblin"), "list should show Goblin");
 
         // 15. TUI renders correctly
         let buf = harness.render(80, 25);
-        assert!(buffer_contains(&buf, "Rustory"), "Header should show Rustory");
-        assert!(buffer_contains(&buf, "rustory >"), "Should show default prompt");
+        assert!(
+            buffer_contains(&buf, "Rustory"),
+            "Header should show Rustory"
+        );
+        assert!(
+            buffer_contains(&buf, "rustory >"),
+            "Should show default prompt"
+        );
 
         // 16. Verify persistence (files on disk)
-        assert!(campaign.path().join("notes").exists(), "notes/ dir should exist on disk");
+        assert!(
+            campaign.path().join("notes").exists(),
+            "notes/ dir should exist on disk"
+        );
     }
 
     #[test]
     fn test_e2e_search_finds_note() {
-        let campaign = TestCampaign::new()
-            .with_system_toml("[system]\nname = \"SearchNoteTest\"\n");
+        let campaign =
+            TestCampaign::new().with_system_toml("[system]\nname = \"SearchNoteTest\"\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
 
@@ -2161,7 +2262,10 @@ success = \"result >= dc\"
 
             // Verify change took effect
             let gs = harness.game_state().unwrap();
-            assert_eq!(gs.get_player("Hero").unwrap().get_stat("strength"), Some(20.0));
+            assert_eq!(
+                gs.get_player("Hero").unwrap().get_stat("strength"),
+                Some(20.0)
+            );
         }
 
         // Session 2: "re-open" by creating new harness from same path
@@ -2169,8 +2273,11 @@ success = \"result >= dc\"
             let mut app = rustory::app::App::new();
             app.running = true;
             let errors = app.load_campaign(campaign.path());
-            assert!(errors.is_empty(), "Reload should succeed: {:?}",
-                errors.iter().map(|e| e.to_string()).collect::<Vec<_>>());
+            assert!(
+                errors.is_empty(),
+                "Reload should succeed: {:?}",
+                errors.iter().map(|e| e.to_string()).collect::<Vec<_>>()
+            );
 
             let gs = app.game_state().unwrap();
             let hero = gs.get_player("Hero").unwrap();
@@ -2194,7 +2301,10 @@ success = \"result >= dc\"
 
             assert_eq!(rules.system_name, "D&D 5e");
             assert_eq!(rules.stat_names.len(), 6, "D&D should have 6 abilities");
-            assert!(rules.checks.iter().any(|c| c.name == "ability_check"), "D&D should have ability_check");
+            assert!(
+                rules.checks.iter().any(|c| c.name == "ability_check"),
+                "D&D should have ability_check"
+            );
 
             // Verify D&D character schema
             let thorin = gs.get_player("Thorin").unwrap();
@@ -2205,7 +2315,10 @@ success = \"result >= dc\"
             assert_eq!(goblin.get_stat("dexterity"), Some(14.0));
 
             // Verify D&D gauges
-            assert!(thorin.gauges.contains_key("hp"), "D&D Thorin should have HP gauge");
+            assert!(
+                thorin.gauges.contains_key("hp"),
+                "D&D Thorin should have HP gauge"
+            );
         }
 
         // Test PbtA system (2d6 + stat, 3-tier resolution)
@@ -2217,7 +2330,10 @@ success = \"result >= dc\"
             assert_eq!(rules.system_name, "PbtA");
             assert_eq!(rules.stat_names.len(), 5, "PbtA should have 5 stats");
             assert_eq!(rules.stat_names[0], "cool");
-            assert!(rules.checks.iter().any(|c| c.name == "move"), "PbtA should have move check");
+            assert!(
+                rules.checks.iter().any(|c| c.name == "move"),
+                "PbtA should have move check"
+            );
 
             // Verify PbtA character schema (different from D&D)
             let ghost = gs.get_player("Ghost").unwrap();
@@ -2227,7 +2343,11 @@ success = \"result >= dc\"
 
             // Verify PbtA 3-tier check definition
             let move_check = rules.checks.iter().find(|c| c.name == "move").unwrap();
-            assert_eq!(move_check.thresholds.len(), 3, "PbtA move should have 3 tiers");
+            assert_eq!(
+                move_check.thresholds.len(),
+                3,
+                "PbtA move should have 3 tiers"
+            );
         }
 
         // Both systems' checks produce deterministic results with same seed
@@ -2239,7 +2359,11 @@ success = \"result >= dc\"
             let dnd = TestHarness::from_fixture("dnd_basic");
             let dnd_gs = dnd.game_state().unwrap();
             let dnd_rules = dnd_gs.rules.as_ref().unwrap();
-            let dnd_check = dnd_rules.checks.iter().find(|c| c.name == "ability_check").unwrap();
+            let dnd_check = dnd_rules
+                .checks
+                .iter()
+                .find(|c| c.name == "ability_check")
+                .unwrap();
             let thorin = dnd_gs.get_player("Thorin").unwrap();
 
             let mut args = HashMap::new();

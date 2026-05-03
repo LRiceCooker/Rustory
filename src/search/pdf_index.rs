@@ -116,7 +116,7 @@ impl SearchIndex {
 
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 if let Ok(text) = std::fs::read_to_string(&path) {
                     if !text.trim().is_empty() {
                         let relative = path
@@ -181,17 +181,12 @@ impl SearchIndex {
             }
 
             // Also check for multi-word match across the full text
-            if query_words.len() > 1
-                && query_words.iter().all(|w| text_lower.contains(w))
-            {
+            if query_words.len() > 1 && query_words.iter().all(|w| text_lower.contains(w)) {
                 // Find the best contiguous passage containing the most query words
                 let lines: Vec<&str> = doc.text.lines().collect();
                 for window in lines.windows(3.min(lines.len())) {
                     let chunk = window.join(" ").to_lowercase();
-                    let chunk_score = query_words
-                        .iter()
-                        .filter(|w| chunk.contains(**w))
-                        .count();
+                    let chunk_score = query_words.iter().filter(|w| chunk.contains(**w)).count();
                     if chunk_score > 1 {
                         let passage = window
                             .iter()
@@ -247,9 +242,7 @@ mod tests {
 
         // Object 2: Pages
         let obj2_offset = pdf.len();
-        pdf.extend_from_slice(
-            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-        );
+        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
 
         // Object 3: Page
         let obj3_offset = pdf.len();
@@ -266,7 +259,9 @@ mod tests {
 
         // Object 5: Font
         let obj5_offset = pdf.len();
-        pdf.extend_from_slice(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+        pdf.extend_from_slice(
+            b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        );
 
         // Cross-reference table
         let xref_offset = pdf.len();
@@ -280,10 +275,8 @@ mod tests {
 
         // Trailer
         pdf.extend_from_slice(
-            format!(
-                "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
-            )
-            .as_bytes(),
+            format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n")
+                .as_bytes(),
         );
 
         pdf
@@ -421,9 +414,15 @@ mod tests {
         );
 
         let sources: Vec<&str> = index.documents.iter().map(|d| d.source.as_str()).collect();
-        assert!(sources.iter().any(|s| s.contains("thorin") && s.contains("lore.md")));
-        assert!(sources.iter().any(|s| s.contains("goblin_king") && s.contains("lore.md")));
-        assert!(sources.iter().any(|s| s.contains("goblin_king") && s.contains("dialogues.md")));
+        assert!(sources
+            .iter()
+            .any(|s| s.contains("thorin") && s.contains("lore.md")));
+        assert!(sources
+            .iter()
+            .any(|s| s.contains("goblin_king") && s.contains("lore.md")));
+        assert!(sources
+            .iter()
+            .any(|s| s.contains("goblin_king") && s.contains("dialogues.md")));
     }
 
     #[test]
@@ -471,9 +470,7 @@ mod tests {
             !results.is_empty(),
             "Search should return results for 'goblin king'"
         );
-        assert!(results
-            .iter()
-            .any(|r| r.passage.contains("Goblin King")));
+        assert!(results.iter().any(|r| r.passage.contains("Goblin King")));
     }
 
     #[test]
@@ -553,11 +550,7 @@ mod tests {
 
         let index = SearchIndex::build(dir.path());
 
-        assert_eq!(
-            index.documents.len(),
-            2,
-            "Should index 1 PDF + 1 markdown"
-        );
+        assert_eq!(index.documents.len(), 2, "Should index 1 PDF + 1 markdown");
         let sources: Vec<&str> = index.documents.iter().map(|d| d.source.as_str()).collect();
         assert!(sources.iter().any(|s| s.contains("rules.pdf")));
         assert!(sources.iter().any(|s| s.contains("lore.md")));
@@ -571,11 +564,13 @@ mod tests {
         std::fs::write(
             notes_dir.join("2026-05-01.md"),
             "## 14:30\nThe party entered the cave.\n\n## 15:00\nThey found treasure.\n",
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::write(
             notes_dir.join("2026-05-02.md"),
             "## 10:00\nCombat with the dragon.\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut index = SearchIndex::new();
         index.index_notes(dir.path());
@@ -584,7 +579,10 @@ mod tests {
 
         let results = index.search("cave", 5);
         assert!(!results.is_empty(), "Should find 'cave' in notes");
-        assert!(results[0].source.contains("2026-05-01.md"), "Source should be the correct note file");
+        assert!(
+            results[0].source.contains("2026-05-01.md"),
+            "Source should be the correct note file"
+        );
     }
 
     #[test]
@@ -595,7 +593,8 @@ mod tests {
         std::fs::write(
             notes_dir.join("2026-05-01.md"),
             "## 14:30\nThe waterfall conceals a hidden door.\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         // Also add a lore file to verify both are indexed
         let npc_dir = dir.path().join("npc").join("goblin");
@@ -603,10 +602,14 @@ mod tests {
         std::fs::write(
             npc_dir.join("lore.md"),
             "The Goblin King rules from his dark throne.\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let index = SearchIndex::build(dir.path());
-        assert!(index.documents.len() >= 2, "Should have at least note + lore");
+        assert!(
+            index.documents.len() >= 2,
+            "Should have at least note + lore"
+        );
 
         // Search should find content from both sources
         let results = index.search("waterfall", 5);

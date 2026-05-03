@@ -132,8 +132,14 @@ mod tests {
         append(campaign, "Second note").unwrap();
 
         let content = list_today(campaign).unwrap();
-        assert!(content.contains("First note"), "Should contain first note. Got: {content}");
-        assert!(content.contains("Second note"), "Should contain second note. Got: {content}");
+        assert!(
+            content.contains("First note"),
+            "Should contain first note. Got: {content}"
+        );
+        assert!(
+            content.contains("Second note"),
+            "Should contain second note. Got: {content}"
+        );
     }
 
     #[test]
@@ -163,7 +169,10 @@ mod tests {
         fs::write(notes_dir.join("2026-05-02.md"), "day 2").unwrap();
 
         let files = list_files(dir.path());
-        assert_eq!(files, vec!["2026-05-01.md", "2026-05-02.md", "2026-05-03.md"]);
+        assert_eq!(
+            files,
+            vec!["2026-05-01.md", "2026-05-02.md", "2026-05-03.md"]
+        );
     }
 
     #[test]

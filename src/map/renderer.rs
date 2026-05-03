@@ -103,9 +103,12 @@ pub fn render_map(world: &WorldMap, viewport: &MapViewport, area: Rect, buf: &mu
                 });
 
                 // Draw the label
-                ctx.print(burg.x + 2.0, y, ratatui::text::Line::from(burg.name.clone()).style(
-                    ratatui::style::Style::default().fg(color),
-                ));
+                ctx.print(
+                    burg.x + 2.0,
+                    y,
+                    ratatui::text::Line::from(burg.name.clone())
+                        .style(ratatui::style::Style::default().fg(color)),
+                );
             }
         });
 
@@ -147,7 +150,11 @@ mod tests {
         render_map(&world, &viewport, area, &mut buf);
 
         // Buffer should not be all spaces — something was rendered
-        let content: String = buf.content().iter().map(|c| c.symbol().to_string()).collect();
+        let content: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect();
         let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
         assert!(
             non_space > 0,
@@ -169,8 +176,11 @@ mod tests {
             let mut buf = Buffer::empty(area);
             render_map(&world, &viewport, area, &mut buf);
 
-            let content: String =
-                buf.content().iter().map(|c| c.symbol().to_string()).collect();
+            let content: String = buf
+                .content()
+                .iter()
+                .map(|c| c.symbol().to_string())
+                .collect();
             let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
             assert!(
                 non_space > 0,
@@ -189,7 +199,11 @@ mod tests {
 
         render_map(&world, &viewport, area, &mut buf);
 
-        let content: String = buf.content().iter().map(|c| c.symbol().to_string()).collect();
+        let content: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect();
         // Should render burg names
         assert!(
             content.contains("Silverport") || content.contains("Ironhold"),
@@ -227,11 +241,17 @@ mod tests {
 
     #[test]
     fn test_viewport_zoom_clamped() {
-        let mut vp = MapViewport { zoom: 10.0, ..Default::default() };
+        let mut vp = MapViewport {
+            zoom: 10.0,
+            ..Default::default()
+        };
         vp.zoom_in();
         assert!(vp.zoom <= 10.0, "Zoom should be clamped to max 10.0");
 
-        let mut vp2 = MapViewport { zoom: 0.1, ..Default::default() };
+        let mut vp2 = MapViewport {
+            zoom: 0.1,
+            ..Default::default()
+        };
         vp2.zoom_out();
         assert!(vp2.zoom >= 0.1, "Zoom should be clamped to min 0.1");
     }
