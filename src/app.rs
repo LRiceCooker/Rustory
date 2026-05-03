@@ -9,6 +9,7 @@ use ratatui::DefaultTerminal;
 
 use crate::audio::library::SoundLibrary;
 use crate::audio::player::AudioPlayer;
+use crate::combat::initiative::InitiativeTracker;
 use crate::persistence::PersistenceLayer;
 use crate::commands::dispatcher::{self, CommandResult, StyledLine};
 use crate::commands::mapping;
@@ -79,6 +80,7 @@ pub struct App {
     pub sound_library: SoundLibrary,
     pub persistence: Option<PersistenceLayer>,
     pub redo_stack: Vec<String>,
+    pub initiative_tracker: Option<InitiativeTracker>,
 }
 
 impl Default for App {
@@ -111,6 +113,7 @@ impl App {
             sound_library: SoundLibrary::default(),
             persistence: None,
             redo_stack: Vec::new(),
+            initiative_tracker: None,
         }
     }
 
@@ -315,6 +318,16 @@ impl App {
         }
         if command == mapping::ENCOUNTER {
             self.handle_encounter_command(args);
+            return;
+        }
+        if command == mapping::COMBAT {
+            self.handle_combat_command(args);
+            return;
+        }
+        if command == mapping::INIT || command == mapping::NEXT || command == mapping::PREV
+            || command == mapping::STATUS || command == mapping::TARGET
+        {
+            self.handle_combat_command(&format!("{command} {args}").trim().to_string());
             return;
         }
         // Hybrid dispatch: built-in first, then custom commands, then unknown
@@ -2087,6 +2100,48 @@ impl App {
         }
 
         self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_combat_command(&mut self, args: &str) {
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let subcmd = parts[0];
+        let _sub_args = parts.get(1).unwrap_or(&"").trim();
+
+        match subcmd {
+            "start" => {
+                if self.mode == Mode::Combat {
+                    self.apply_command_result(CommandResult::Error(
+                        "Already in combat mode.".to_string(),
+                    ));
+                    return;
+                }
+                self.mode = Mode::Combat;
+                self.initiative_tracker = Some(InitiativeTracker::new());
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Combat started. Use 'init add <name> <value>' to add combatants.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            "end" => {
+                if self.mode != Mode::Combat {
+                    self.apply_command_result(CommandResult::Error(
+                        "Not in combat mode.".to_string(),
+                    ));
+                    return;
+                }
+                self.mode = Mode::Default;
+                self.initiative_tracker = None;
+                self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                    "Combat ended.".to_string(),
+                    Style::default().fg(Color::Green),
+                )]));
+            }
+            _ => {
+                self.apply_command_result(CommandResult::Error(
+                    format!("Unknown combat subcommand: '{subcmd}'. Use 'combat start' or 'combat end'."),
+                ));
+            }
+        }
     }
 
     fn handle_history_command(&mut self, args: &str) {
@@ -5331,5 +5386,74 @@ mod tests {
 
         app.load_campaign(&campaign);
         assert_eq!(app.mode, Mode::Default, "Loading campaign should reset mode to Default");
+    }
+
+    // ---- Combat start/end tests ----
+
+    #[test]
+    fn test_combat_start_enters_combat_mode() {
+        let mut app = App::new();
+        app.running = true;
+
+        app.dispatch_command("combat start");
+        assert_eq!(app.mode, Mode::Combat);
+        assert!(app.initiative_tracker.is_some(), "Tracker should be created");
+    }
+
+    #[test]
+    fn test_combat_start_creates_empty_tracker() {
+        let mut app = App::new();
+        app.running = true;
+
+        app.dispatch_command("combat start");
+        let tracker = app.initiative_tracker.as_ref().unwrap();
+        assert!(tracker.is_empty());
+        assert_eq!(tracker.len(), 0);
+    }
+
+    #[test]
+    fn test_combat_end_returns_to_default() {
+        let mut app = App::new();
+        app.running = true;
+
+        app.dispatch_command("combat start");
+        assert_eq!(app.mode, Mode::Combat);
+
+        app.dispatch_command("combat end");
+        assert_eq!(app.mode, Mode::Default);
+        assert!(app.initiative_tracker.is_none(), "Tracker should be cleared");
+    }
+
+    #[test]
+    fn test_combat_start_already_in_combat_shows_error() {
+        let mut app = App::new();
+        app.running = true;
+
+        app.dispatch_command("combat start");
+        app.messages.clear();
+
+        app.dispatch_command("combat start");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Already in combat"), "Should show error. Got: {output}");
+    }
+
+    #[test]
+    fn test_combat_end_not_in_combat_shows_error() {
+        let mut app = App::new();
+        app.running = true;
+
+        app.dispatch_command("combat end");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Not in combat"), "Should show error. Got: {output}");
+    }
+
+    #[test]
+    fn test_combat_start_output_message() {
+        let mut app = App::new();
+        app.running = true;
+
+        app.dispatch_command("combat start");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Combat started"), "Should show start message. Got: {output}");
     }
 }

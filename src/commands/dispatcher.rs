@@ -137,6 +137,10 @@ pub fn dispatch(
         mapping::BESTIARY => {
             CommandResult::Error("bestiary command must be handled by the app".to_string())
         }
+        mapping::COMBAT | mapping::INIT | mapping::NEXT | mapping::PREV | mapping::STATUS
+        | mapping::TARGET => {
+            CommandResult::Error("combat command must be handled by the app".to_string())
+        }
         _ => {
             // Look up in custom commands HashMap
             if let Some(commands) = custom_commands {
