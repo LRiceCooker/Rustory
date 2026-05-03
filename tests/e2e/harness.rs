@@ -1994,6 +1994,127 @@ KTHXBYE",
         );
     }
 
+    // ---- Phase 22 E2E: Full regression suite ----
+
+    #[test]
+    fn test_e2e_full_regression_smoke_test() {
+        let system_toml = "\
+[system]
+name = \"Smoke Test\"
+
+[character.schema]
+columns = [\"name\", \"class\", \"strength\", \"hp_max\", \"ac\"]
+
+[stats.definition]
+abilities = [\"strength\"]
+
+[resources.hp]
+type = \"gauge\"
+max_stat = \"hp_max\"
+
+[check.ability_check]
+roll = \"1d20 + modifier({ability})\"
+success = \"result >= dc\"
+";
+
+        let campaign = TestCampaign::new()
+            .with_system_toml(system_toml)
+            .with_player("thorin", "name,class,strength,hp_max,ac\nThorin,Fighter,18,52,18\n")
+            .with_npc("goblin", "name,class,strength,hp_max,ac\nGoblin,Monster,8,7,15\n")
+            .with_lore("goblin", "# Goblin\nA sneaky green creature that lurks in caves.\n")
+            .with_bestiary_creature("orc", "name,class,strength,hp_max,ac\nOrc,Monster,16,15,13\n")
+            .with_encounter(
+                "orc_ambush",
+                "[encounter]\nname = \"Orc Ambush\"\ndescription = \"Orcs!\"\n\n[[creatures]]\ntemplate = \"orc\"\ncount = 2\n",
+            );
+
+        let mut harness = TestHarness::from_campaign(&campaign);
+
+        // 1. Verify characters loaded
+        let gs = harness.game_state().unwrap();
+        assert_eq!(gs.players.len(), 1);
+        assert_eq!(gs.npcs.len(), 1);
+        let thorin = gs.get_player("Thorin").unwrap();
+        assert_eq!(thorin.get_stat("strength"), Some(18.0));
+
+        // 2. Show character
+        harness.execute("show thorin");
+        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(out.contains("Thorin"), "show should display Thorin");
+
+        // 3. Set a stat
+        harness.execute("set thorin.strength 20");
+        let gs = harness.game_state().unwrap();
+        assert_eq!(gs.get_player("Thorin").unwrap().get_stat("strength"), Some(20.0));
+
+        // 4. Roll dice
+        harness.execute("roll 1d20");
+        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(out.contains("result:"), "roll should show result");
+
+        // 5. Help command
+        harness.execute("help");
+        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(out.contains("Available commands"), "help should work");
+
+        // 6. Search (finds lore)
+        harness.execute("search caves");
+        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(out.contains("cave") || out.contains("lurks"), "search should find lore content");
+
+        // 7. Spawn from bestiary
+        harness.execute("spawn orc");
+        let gs = harness.game_state().unwrap();
+        assert!(gs.get_npc("Orc #1").is_some(), "spawn should create Orc #1");
+
+        // 8. Encounter
+        harness.execute("encounter orc ambush");
+        let gs = harness.game_state().unwrap();
+        assert!(gs.get_npc("Orc #2").is_some(), "encounter should create Orc #2");
+
+        // 9. Combat mode
+        harness.execute("combat start");
+        assert_eq!(harness.app.mode, rustory::app::Mode::Combat);
+
+        harness.execute("init add Thorin 18");
+        harness.execute("init add Goblin 12");
+
+        // 10. Status shows combatants
+        harness.execute("status");
+        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(out.contains("Thorin") && out.contains("Goblin"), "status should show combatants");
+
+        // 11. Next advances turn
+        harness.execute("next");
+
+        // 12. Combat end
+        harness.execute("combat end");
+        assert_eq!(harness.app.mode, rustory::app::Mode::Default);
+
+        // 13. Add note
+        harness.execute("note The smoke test passed");
+        harness.execute("note list");
+        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(out.contains("smoke test passed"), "note list should show note");
+
+        // 14. List players/npcs
+        harness.execute("list players");
+        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(out.contains("Thorin"), "list should show Thorin");
+
+        harness.execute("list npcs");
+        let out: String = harness.output_history().iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(out.contains("Goblin"), "list should show Goblin");
+
+        // 15. TUI renders correctly
+        let buf = harness.render(80, 25);
+        assert!(buffer_contains(&buf, "Rustory"), "Header should show Rustory");
+        assert!(buffer_contains(&buf, "rustory >"), "Should show default prompt");
+
+        // 16. Verify persistence (files on disk)
+        assert!(campaign.path().join("notes").exists(), "notes/ dir should exist on disk");
+    }
+
     #[test]
     fn test_e2e_search_finds_note() {
         let campaign = TestCampaign::new()
