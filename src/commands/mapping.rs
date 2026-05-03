@@ -2,6 +2,7 @@ pub const COMBAT: &str = "combat";
 pub const DAMAGE: &str = "damage";
 pub const DAMAGE_ALIAS: &str = "dmg";
 pub const ENCOUNTER: &str = "encounter";
+pub const GIVE: &str = "give";
 pub const HEAL: &str = "heal";
 pub const HEAL_ALIAS: &str = "hp";
 pub const HELP: &str = "help";
@@ -28,8 +29,8 @@ pub const SPAWN: &str = "spawn";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
 
-pub const COMMANDS: [&str; 28] = [
-    COMBAT, DAMAGE, DAMAGE_ALIAS, ENCOUNTER, HEAL, HEAL_ALIAS, HELP, HISTORY, INIT, LIST, LOAD,
-    MAP, NEW, NEXT, NOTE, PREV, QUIT, REDO, ROLL, SEARCH, SET, SHOW, SOUND, SPAWN, STATUS, TARGET,
-    UNDO, VALIDATE,
+pub const COMMANDS: [&str; 29] = [
+    COMBAT, DAMAGE, DAMAGE_ALIAS, ENCOUNTER, GIVE, HEAL, HEAL_ALIAS, HELP, HISTORY, INIT, LIST,
+    LOAD, MAP, NEW, NEXT, NOTE, PREV, QUIT, REDO, ROLL, SEARCH, SET, SHOW, SOUND, SPAWN, STATUS,
+    TARGET, UNDO, VALIDATE,
 ];

@@ -491,6 +491,10 @@ impl App {
             self.handle_heal_command(args);
             return;
         }
+        if command == mapping::GIVE {
+            self.handle_give_command(args);
+            return;
+        }
         if command == mapping::ENCOUNTER {
             self.handle_encounter_command(args);
             return;
@@ -2077,6 +2081,157 @@ impl App {
         self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
             format!("{ch_name}: {old_hp} → {new_hp} HP"),
             Style::default().fg(Color::Green),
+        )]));
+    }
+
+    fn handle_give_command(&mut self, args: &str) {
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: give <item> <from> <to> (e.g. give Healing Potion thorin elara)".to_string(),
+            ));
+            return;
+        }
+
+        if self.game_state.is_none() {
+            self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
+            return;
+        }
+
+        // Parse args: last two words are <from> <to>, everything before is <item>
+        let words: Vec<&str> = args.split_whitespace().collect();
+        if words.len() < 3 {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: give <item> <from> <to> (e.g. give Healing Potion thorin elara)".to_string(),
+            ));
+            return;
+        }
+
+        let to_name = words[words.len() - 1];
+        let from_name = words[words.len() - 2];
+        let item_name = words[..words.len() - 2].join(" ");
+
+        let gs = self.game_state.as_mut().unwrap();
+        let from_lower = from_name.to_lowercase();
+        let to_lower = to_name.to_lowercase();
+
+        // Find the item in the source character's inventory (case-insensitive)
+        // We need indices to work around borrow checker with two mutable borrows
+        let from_idx = gs
+            .players
+            .iter()
+            .position(|c| c.name.to_lowercase() == from_lower)
+            .map(|i| (i, true))
+            .or_else(|| {
+                gs.npcs
+                    .iter()
+                    .position(|c| c.name.to_lowercase() == from_lower)
+                    .map(|i| (i, false))
+            });
+
+        let (from_idx, from_is_player) = match from_idx {
+            Some(v) => v,
+            None => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Character \"{from_name}\" not found."
+                )));
+                return;
+            }
+        };
+
+        let to_idx = gs
+            .players
+            .iter()
+            .position(|c| c.name.to_lowercase() == to_lower)
+            .map(|i| (i, true))
+            .or_else(|| {
+                gs.npcs
+                    .iter()
+                    .position(|c| c.name.to_lowercase() == to_lower)
+                    .map(|i| (i, false))
+            });
+
+        let (to_idx, to_is_player) = match to_idx {
+            Some(v) => v,
+            None => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Character \"{to_name}\" not found."
+                )));
+                return;
+            }
+        };
+
+        // Get the source character and find the item
+        let from_char = if from_is_player {
+            &gs.players[from_idx]
+        } else {
+            &gs.npcs[from_idx]
+        };
+
+        let item_lower = item_name.to_lowercase();
+        let item = from_char
+            .inventory
+            .items
+            .iter()
+            .find(|i| i.name.to_lowercase() == item_lower);
+
+        let item = match item {
+            Some(i) => i.clone(),
+            None => {
+                let ch_name = from_char.name.clone();
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Item \"{item_name}\" not found in {ch_name}'s inventory."
+                )));
+                return;
+            }
+        };
+
+        // Remove from source, add to destination
+        let from_char_mut = if from_is_player {
+            &mut gs.players[from_idx]
+        } else {
+            &mut gs.npcs[from_idx]
+        };
+        from_char_mut.inventory.remove_item(&item.name);
+        let from_display = from_char_mut.name.clone();
+
+        let to_char_mut = if to_is_player {
+            &mut gs.players[to_idx]
+        } else {
+            &mut gs.npcs[to_idx]
+        };
+        to_char_mut.inventory.add_item(item.clone());
+        let to_display = to_char_mut.name.clone();
+
+        // Persist both characters' inventories
+        if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &gs.schema) {
+            let from_char = if from_is_player {
+                &gs.players[from_idx]
+            } else {
+                &gs.npcs[from_idx]
+            };
+            let _ = pl.persist_inventory(
+                from_char,
+                from_is_player,
+                schema,
+                &format!("{from_display} gives {} to {to_display}", item.name),
+            );
+
+            let to_char = if to_is_player {
+                &gs.players[to_idx]
+            } else {
+                &gs.npcs[to_idx]
+            };
+            let _ = pl.persist_inventory(
+                to_char,
+                to_is_player,
+                schema,
+                &format!("{to_display} receives {} from {from_display}", item.name),
+            );
+        }
+
+        self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+            format!("{from_display} gives {} to {to_display}", item.name),
+            Style::default().fg(Color::Blue),
         )]));
     }
 
@@ -7850,5 +8005,134 @@ mod tests {
             .get_gauge("hp")
             .unwrap();
         assert_eq!(hp.current, 47.0);
+    }
+
+    // --- Give command tests ---
+
+    fn setup_give_campaign(dir: &Path) -> PathBuf {
+        let campaign = dir.join("give_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"hp_max\"]\n\n[resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/thorin")).unwrap();
+        std::fs::write(
+            campaign.join("players/thorin/sheet.csv"),
+            "name,hp_max\nThorin,52\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign.join("players/thorin/inventory.csv"),
+            "item,quantity,weight,notes\nHealing Potion,3,0.5,heals 2d4\nLongsword,1,3,+1 magical\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("players/elara")).unwrap();
+        std::fs::write(
+            campaign.join("players/elara/sheet.csv"),
+            "name,hp_max\nElara,40\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign.join("players/elara/inventory.csv"),
+            "item,quantity,weight,notes\nShield,1,6,\n",
+        )
+        .unwrap();
+        campaign
+    }
+
+    #[test]
+    fn test_give_transfers_item() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_give_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("give Healing Potion thorin elara");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Thorin gives Healing Potion to Elara"),
+            "Should show transfer message. Got: {output}"
+        );
+
+        // Verify item removed from Thorin
+        let gs = app.game_state.as_ref().unwrap();
+        let thorin = gs.get_player("Thorin").unwrap();
+        assert!(
+            thorin.get_item("Healing Potion").is_none(),
+            "Healing Potion should be removed from Thorin"
+        );
+
+        // Verify item added to Elara
+        let elara = gs.get_player("Elara").unwrap();
+        assert!(
+            elara.get_item("Healing Potion").is_some(),
+            "Healing Potion should be added to Elara"
+        );
+        // Elara should still have her Shield
+        assert!(elara.get_item("Shield").is_some());
+        // Thorin should still have his Longsword
+        assert!(thorin.get_item("Longsword").is_some());
+    }
+
+    #[test]
+    fn test_give_item_not_found() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_give_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("give Ghost Item thorin elara");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should show item not found error. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_give_unknown_character() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_give_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("give Longsword nobody elara");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("not found"),
+            "Should show character not found error. Got: {output}"
+        );
     }
 }
