@@ -573,24 +573,28 @@ impl App {
                     ));
                 }
 
-                // List custom commands from rules/commands/*.lol if any
-                let commands_dir = gs.campaign_path.join("rules/commands");
-                if commands_dir.exists() {
-                    let mut custom_cmds: Vec<String> = Vec::new();
-                    if let Ok(entries) = std::fs::read_dir(&commands_dir) {
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.extension().and_then(|e| e.to_str()) == Some("lol") {
-                                if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
-                                    custom_cmds.push(name.to_string());
-                                }
-                            }
-                        }
-                    }
-                    custom_cmds.sort();
-                    if !custom_cmds.is_empty() {
+                // List custom commands with docs from README.md
+                if !gs.custom_commands.is_empty() {
+                    let mut cmd_names: Vec<&String> =
+                        gs.custom_commands.keys().collect();
+                    cmd_names.sort();
+
+                    lines.push(StyledLine::new(String::new(), Style::default()));
+                    lines.push(StyledLine::new(
+                        "Custom Commands:".to_string(),
+                        Style::default().fg(Color::Cyan),
+                    ));
+
+                    for name in cmd_names {
+                        let line = if let Some(desc) = gs.custom_command_docs.get(name) {
+                            // Take first line of description only
+                            let first_line = desc.lines().next().unwrap_or("");
+                            format!("  {name}  — {first_line}")
+                        } else {
+                            format!("  {name}")
+                        };
                         lines.push(StyledLine::new(
-                            format!("  Custom commands: {}", custom_cmds.join(", ")),
+                            line,
                             Style::default().fg(Color::Green),
                         ));
                     }
@@ -3992,10 +3996,103 @@ mod tests {
 
         let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
         assert!(
+            output_texts.iter().any(|t| t.contains("Custom Commands")),
+            "help should show Custom Commands header. Messages: {output_texts:?}"
+        );
+        assert!(
+            output_texts.iter().any(|t| t.contains("heal")),
+            "help should list heal command. Messages: {output_texts:?}"
+        );
+        assert!(
+            output_texts.iter().any(|t| t.contains("smite")),
+            "help should list smite command. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_help_shows_custom_command_docs_from_readme() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("doc_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules/commands")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"Doc Test\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/smite.lol"),
+            "HAI 1.2\nKTHXBYE\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/heal.lol"),
+            "HAI 1.2\nKTHXBYE\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/README.md"),
+            "# Custom Commands\n\n## smite\nDeal divine damage to a target.\n\n## heal\nRestore hit points to an ally.\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+        app.messages.clear();
+
+        app.dispatch_command("help");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
             output_texts
                 .iter()
-                .any(|t| t.contains("heal") && t.contains("smite")),
-            "help should list custom commands. Messages: {output_texts:?}"
+                .any(|t| t.contains("smite") && t.contains("Deal divine damage")),
+            "help should show smite with description. Messages: {output_texts:?}"
+        );
+        assert!(
+            output_texts
+                .iter()
+                .any(|t| t.contains("heal") && t.contains("Restore hit points")),
+            "help should show heal with description. Messages: {output_texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_help_shows_custom_commands_without_docs_by_name_only() {
+        let dir = TempDir::new().unwrap();
+        let campaign_dir = dir.path().join("nodoc_campaign");
+        std::fs::create_dir_all(campaign_dir.join("rules/commands")).unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/system.toml"),
+            "[system]\nname = \"NoDoc Test\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign_dir.join("rules/commands/zap.lol"),
+            "HAI 1.2\nKTHXBYE\n",
+        )
+        .unwrap();
+        // No README.md
+
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command(&format!("load {}", campaign_dir.display()));
+        app.messages.clear();
+
+        app.dispatch_command("help");
+
+        let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            output_texts.iter().any(|t| t.contains("Custom Commands")),
+            "help should show Custom Commands header. Messages: {output_texts:?}"
+        );
+        // Should show name only without a dash separator
+        let zap_line = output_texts.iter().find(|t| t.contains("zap"));
+        assert!(zap_line.is_some(), "help should list zap command. Messages: {output_texts:?}");
+        assert!(
+            !zap_line.unwrap().contains("—"),
+            "zap without docs should not have a dash. Line: {:?}",
+            zap_line
         );
     }
 
