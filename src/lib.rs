@@ -5,6 +5,7 @@ pub mod combat;
 pub mod commands;
 pub mod game_state;
 pub mod map;
+pub mod notes;
 pub mod persistence;
 pub mod rules;
 pub mod schema;
