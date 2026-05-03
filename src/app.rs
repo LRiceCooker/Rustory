@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::{Rng, RngCore};
 use ratatui::style::{Color, Style};
+use ratatui::text::Span;
 use ratatui::DefaultTerminal;
 
 use crate::audio::library::SoundLibrary;
@@ -163,6 +164,60 @@ impl App {
 
     pub fn game_state_mut(&mut self) -> Option<&mut GameState> {
         self.game_state.as_mut()
+    }
+
+    /// Build the colored prompt spans for the input bar.
+    ///
+    /// Format: `rustory[/campaign_name][ sound.mp3][ [mode]] > `
+    /// Colors: "rustory" white, "/campaign_name" cyan, "sound.mp3" green,
+    ///         "[mode]" yellow, " > " default.
+    pub fn prompt_spans(&self) -> Vec<Span<'static>> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+
+        spans.push(Span::raw("rustory"));
+
+        if let Some(gs) = &self.game_state {
+            spans.push(Span::styled(
+                format!("/{}", gs.campaign_name),
+                Style::default().fg(Color::Cyan),
+            ));
+        }
+
+        if let Some(player) = &self.audio_player {
+            if let Some(track) = player.current_track() {
+                spans.push(Span::styled(
+                    format!(" {track}"),
+                    Style::default().fg(Color::Green),
+                ));
+            }
+        }
+
+        match self.mode {
+            Mode::Map => {
+                spans.push(Span::styled(
+                    " [map]".to_string(),
+                    Style::default().fg(Color::Yellow),
+                ));
+            }
+            Mode::Combat => {
+                spans.push(Span::styled(
+                    " [combat]".to_string(),
+                    Style::default().fg(Color::Yellow),
+                ));
+            }
+            Mode::Default => {}
+        }
+
+        spans.push(Span::raw(" > "));
+        spans
+    }
+
+    /// Total character width of the prompt (for cursor positioning).
+    pub fn prompt_len(&self) -> usize {
+        self.prompt_spans()
+            .iter()
+            .map(|s| s.content.len())
+            .sum()
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
@@ -580,11 +635,11 @@ impl App {
             return;
         }
 
-        // Load the campaign
-        let (gs, errors) = GameState::load(&path);
+        // Load the campaign (GameState + WorldMap + SoundLibrary + git persistence)
+        let errors = self.load_campaign(&path);
 
         if !errors.is_empty() {
-            // Show all errors, do NOT load the campaign
+            // Show all errors, do NOT keep the campaign
             let mut lines = vec![StyledLine::new(
                 format!("Failed to load campaign from \"{}\":", path.display()),
                 Style::default().fg(Color::Red),
@@ -595,15 +650,30 @@ impl App {
                     Style::default().fg(Color::Red),
                 ));
             }
+            // Clear the partially loaded state
+            self.game_state = None;
+            self.world_map = None;
+            self.sound_library = SoundLibrary::default();
+            self.persistence = None;
             self.apply_command_result(CommandResult::Output(lines));
             return;
         }
 
-        // Success — store game state
-        let campaign_name = gs.campaign_name.clone();
-        let player_count = gs.players.len();
-        let npc_count = gs.npcs.len();
-        self.game_state = Some(gs);
+        // Success — build response
+        let (campaign_name, player_count, npc_count, system_name) =
+            if let Some(ref gs) = self.game_state {
+                (
+                    gs.campaign_name.clone(),
+                    gs.players.len(),
+                    gs.npcs.len(),
+                    gs.rules.as_ref().map(|r| r.system_name.clone()),
+                )
+            } else {
+                return;
+            };
+
+        let has_map = self.world_map.is_some();
+        let sound_count = self.sound_library.file_count();
 
         let mut lines = vec![StyledLine::new(
             format!("Campaign \"{campaign_name}\" loaded successfully."),
@@ -613,13 +683,23 @@ impl App {
             format!("  {player_count} player(s), {npc_count} NPC(s)"),
             Style::default().fg(Color::Green),
         ));
-        if let Some(ref gs) = self.game_state {
-            if let Some(ref rules) = gs.rules {
-                lines.push(StyledLine::new(
-                    format!("  System: {}", rules.system_name),
-                    Style::default().fg(Color::Green),
-                ));
-            }
+        if let Some(name) = system_name {
+            lines.push(StyledLine::new(
+                format!("  System: {name}"),
+                Style::default().fg(Color::Green),
+            ));
+        }
+        if has_map {
+            lines.push(StyledLine::new(
+                "  Map: loaded".to_string(),
+                Style::default().fg(Color::Green),
+            ));
+        }
+        if sound_count > 0 {
+            lines.push(StyledLine::new(
+                format!("  Sound library: {sound_count} file(s)"),
+                Style::default().fg(Color::Green),
+            ));
         }
         self.apply_command_result(CommandResult::Output(lines));
     }
@@ -6230,6 +6310,116 @@ mod tests {
     #[test]
     fn test_mode_combat_prompt() {
         assert_eq!(Mode::Combat.prompt(), "rustory [combat] > ");
+    }
+
+    // ---- Smart prompt tests ----
+
+    #[test]
+    fn test_prompt_no_campaign() {
+        let app = App::new();
+        assert_eq!(app.prompt_len(), "rustory > ".len());
+        let spans = app.prompt_spans();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "rustory > ");
+    }
+
+    #[test]
+    fn test_prompt_with_campaign() {
+        let mut app = App::new();
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("my_quest");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        app.load_campaign(&campaign);
+        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "rustory/my_quest > ");
+    }
+
+    #[test]
+    fn test_prompt_campaign_map_mode() {
+        let mut app = App::new();
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("my_quest");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        app.load_campaign(&campaign);
+        app.mode = Mode::Map;
+        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "rustory/my_quest [map] > ");
+    }
+
+    #[test]
+    fn test_prompt_campaign_combat_mode() {
+        let mut app = App::new();
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("my_quest");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        app.load_campaign(&campaign);
+        app.mode = Mode::Combat;
+        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "rustory/my_quest [combat] > ");
+    }
+
+    #[test]
+    fn test_prompt_no_campaign_map_mode() {
+        let mut app = App::new();
+        app.mode = Mode::Map;
+        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "rustory [map] > ");
+    }
+
+    #[test]
+    fn test_prompt_colors() {
+        let mut app = App::new();
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("quest");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        app.load_campaign(&campaign);
+        app.mode = Mode::Combat;
+        let spans = app.prompt_spans();
+        // "rustory" — no specific fg
+        assert_eq!(spans[0].style, Style::default());
+        // "/quest" — cyan
+        assert_eq!(spans[1].style, Style::default().fg(Color::Cyan));
+        // " [combat]" — yellow
+        assert_eq!(spans[2].style, Style::default().fg(Color::Yellow));
+        // " > " — default
+        assert_eq!(spans[3].style, Style::default());
+    }
+
+    #[test]
+    fn test_prompt_len_matches_text() {
+        let mut app = App::new();
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("quest");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        app.load_campaign(&campaign);
+        app.mode = Mode::Map;
+        let text: String = app.prompt_spans().iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(app.prompt_len(), text.len());
     }
 
     #[test]

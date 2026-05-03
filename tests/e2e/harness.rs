@@ -923,11 +923,11 @@ mod tests {
         let mut harness = TestHarness::new();
         harness.execute("load tests/e2e/fixtures/dnd_basic");
 
-        // Render and check prompt is visible (no header bar)
+        // Render and check prompt is visible (campaign name in prompt)
         let buf = harness.render(80, 24);
         assert!(
-            buffer_contains(&buf, "rustory >"),
-            "Should show prompt after loading campaign"
+            buffer_contains(&buf, "rustory/dnd_basic >"),
+            "Should show campaign prompt after loading campaign"
         );
     }
 
@@ -2198,8 +2198,12 @@ success = \"result >= dc\"
         // 15. TUI renders correctly (no header bar, just main area + input)
         let buf = harness.render(80, 25);
         assert!(
-            buffer_contains(&buf, "rustory >"),
-            "Should show default prompt"
+            buffer_contains(&buf, "rustory/"),
+            "Should show campaign prompt with name"
+        );
+        assert!(
+            buffer_contains(&buf, " > "),
+            "Should show prompt separator"
         );
 
         // 16. Verify persistence (files on disk)

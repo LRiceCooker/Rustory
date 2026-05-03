@@ -41,8 +41,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     // Input bar
-    let prompt = app.mode.prompt();
-    let mut input_spans = vec![Span::raw(prompt.to_string()), Span::raw(app.input.clone())];
+    let prompt_spans = app.prompt_spans();
+    let prompt_len = app.prompt_len();
+    let mut input_spans: Vec<Span> = prompt_spans;
+    input_spans.push(Span::raw(app.input.clone()));
     if let Some(hint) = app.autocomplete_hint() {
         input_spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     }
@@ -52,7 +54,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     // Position cursor after the prompt + user's cursor position
     // +1 for the left border
-    let cursor_x = chunks[1].x + 1 + prompt.len() as u16 + app.cursor_position as u16;
+    let cursor_x = chunks[1].x + 1 + prompt_len as u16 + app.cursor_position as u16;
     let cursor_y = chunks[1].y + 1; // +1 for the top border
     frame.set_cursor_position(Position::new(cursor_x, cursor_y));
 }
