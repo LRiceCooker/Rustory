@@ -435,6 +435,10 @@ impl App {
         self.redo_stack.clear();
 
         // Handle app-level commands that need access to App state
+        if command == mapping::CAT {
+            self.handle_cat_command(args);
+            return;
+        }
         if command == mapping::HISTORY {
             self.handle_history_command(args);
             return;
@@ -657,6 +661,7 @@ impl App {
                 "  new   — create a new campaign from a template (e.g. new my_game sample)",
             ),
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
+            StyledLine::plain("  cat      — display a file (e.g. cat npc/goblin_king/dialogues.md)"),
             StyledLine::plain("  show     — display character sheet (e.g. show thorin)"),
             StyledLine::plain("  set      — set a character field (e.g. set thorin.hp 35)"),
             StyledLine::plain("  ls       — list players or npcs (e.g. ls players)"),
@@ -3503,6 +3508,118 @@ impl App {
                 }
             }
         }
+    }
+
+    fn handle_cat_command(&mut self, args: &str) {
+        if args.trim().is_empty() {
+            self.apply_command_result(CommandResult::Error(
+                "Usage: cat <file> (e.g. cat npc/goblin_king/dialogues.md)".to_string(),
+            ));
+            return;
+        }
+
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded. Use \"load <path>\" first.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let rel_path = args.trim();
+        let full_path = gs.campaign_path.join(rel_path);
+
+        if !full_path.exists() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "File not found: {rel_path}"
+            )));
+            return;
+        }
+
+        if !full_path.is_file() {
+            self.apply_command_result(CommandResult::Error(format!(
+                "Not a file: {rel_path}"
+            )));
+            return;
+        }
+
+        let is_markdown = full_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+            .unwrap_or(false);
+
+        let content = match std::fs::read_to_string(&full_path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.apply_command_result(CommandResult::Error(format!(
+                    "Cannot read file: {e}"
+                )));
+                return;
+            }
+        };
+
+        let mut lines: Vec<StyledLine> = Vec::new();
+
+        if !is_markdown {
+            lines.push(StyledLine::new(
+                format!("Warning: {rel_path} is not a markdown file"),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+
+        if is_markdown {
+            for line in content.lines() {
+                let styled = if line.starts_with("### ") {
+                    StyledLine::new(
+                        line.trim_start_matches("### ").to_string(),
+                        Style::default().fg(Color::Cyan),
+                    )
+                } else if line.starts_with("## ") {
+                    StyledLine::new(
+                        line.trim_start_matches("## ").to_string(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    )
+                } else if line.starts_with("# ") {
+                    StyledLine::new(
+                        line.trim_start_matches("# ").to_string(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    )
+                } else if line.starts_with("- ") || line.starts_with("* ") {
+                    StyledLine::new(
+                        format!("  {line}"),
+                        Style::default().fg(Color::Blue),
+                    )
+                } else if line.starts_with("> ") {
+                    StyledLine::new(
+                        format!("  {}", line.trim_start_matches("> ")),
+                        Style::default().fg(Color::DarkGray),
+                    )
+                } else if line.starts_with("```") {
+                    StyledLine::new(
+                        line.to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    )
+                } else if line.trim().is_empty() {
+                    StyledLine::new(String::new(), Style::default())
+                } else {
+                    StyledLine::plain(line.to_string())
+                };
+                lines.push(styled);
+            }
+        } else {
+            for line in content.lines() {
+                lines.push(StyledLine::plain(line.to_string()));
+            }
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
     }
 
     fn handle_search_command(&mut self, args: &str) {
@@ -8133,6 +8250,127 @@ mod tests {
         assert!(
             output.contains("not found"),
             "Should show character not found error. Got: {output}"
+        );
+    }
+
+    // --- Cat command tests ---
+
+    fn setup_cat_campaign(dir: &Path) -> PathBuf {
+        let campaign = dir.join("cat_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"T\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("npc/goblin_king")).unwrap();
+        std::fs::write(
+            campaign.join("npc/goblin_king/dialogues.md"),
+            "# Goblin King\n\n## Greetings\n\nWho dares enter my domain?\n\n- Option A\n- Option B\n",
+        )
+        .unwrap();
+        std::fs::write(
+            campaign.join("npc/goblin_king/notes.txt"),
+            "Some plain text notes\nLine two\n",
+        )
+        .unwrap();
+        campaign
+    }
+
+    #[test]
+    fn test_cat_displays_markdown_file() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_cat_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("cat npc/goblin_king/dialogues.md");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Goblin King"),
+            "Should display header content. Got: {output}"
+        );
+        assert!(
+            output.contains("Greetings"),
+            "Should display subheader content. Got: {output}"
+        );
+        assert!(
+            output.contains("Who dares enter my domain?"),
+            "Should display body text. Got: {output}"
+        );
+        // Headers should be rendered without the # prefix
+        assert!(
+            !output.contains("# Goblin King"),
+            "Should strip markdown header prefix. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_cat_file_not_found() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_cat_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("cat npc/nonexistent.md");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("File not found"),
+            "Should show file not found error. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_cat_non_markdown_warning() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_cat_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("cat npc/goblin_king/notes.txt");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Warning"),
+            "Should warn about non-markdown file. Got: {output}"
+        );
+        assert!(
+            output.contains("not a markdown file"),
+            "Should mention it's not markdown. Got: {output}"
+        );
+        // Should still display the content
+        assert!(
+            output.contains("Some plain text notes"),
+            "Should still display file content. Got: {output}"
         );
     }
 }

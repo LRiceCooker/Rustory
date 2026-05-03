@@ -1,3 +1,4 @@
+pub const CAT: &str = "cat";
 pub const COMBAT: &str = "combat";
 pub const DAMAGE: &str = "damage";
 pub const DAMAGE_ALIAS: &str = "dmg";
@@ -29,8 +30,8 @@ pub const SPAWN: &str = "spawn";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
 
-pub const COMMANDS: [&str; 29] = [
-    COMBAT, DAMAGE, DAMAGE_ALIAS, ENCOUNTER, GIVE, HEAL, HEAL_ALIAS, HELP, HISTORY, INIT, LIST,
-    LOAD, MAP, NEW, NEXT, NOTE, PREV, QUIT, REDO, ROLL, SEARCH, SET, SHOW, SOUND, SPAWN, STATUS,
-    TARGET, UNDO, VALIDATE,
+pub const COMMANDS: [&str; 30] = [
+    CAT, COMBAT, DAMAGE, DAMAGE_ALIAS, ENCOUNTER, GIVE, HEAL, HEAL_ALIAS, HELP, HISTORY, INIT,
+    LIST, LOAD, MAP, NEW, NEXT, NOTE, PREV, QUIT, REDO, ROLL, SEARCH, SET, SHOW, SOUND, SPAWN,
+    STATUS, TARGET, UNDO, VALIDATE,
 ];
