@@ -27,7 +27,7 @@ pub fn build_registry() -> HashMap<&'static str, ArgCompleter> {
     registry.insert("ls", complete_stub as ArgCompleter);
     registry.insert("sound", complete_sound as ArgCompleter);
     registry.insert("map", complete_map as ArgCompleter);
-    registry.insert("encounter", complete_stub as ArgCompleter);
+    registry.insert("encounter", complete_encounter as ArgCompleter);
     registry.insert("combat", complete_stub as ArgCompleter);
     registry.insert("init", complete_stub as ArgCompleter);
     registry.insert("note", complete_stub as ArgCompleter);
@@ -284,6 +284,46 @@ fn complete_sound(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
         }
         _ => Vec::new(),
     }
+}
+
+/// Completer for `encounter` subcommands.
+/// `encounter show <zone>` / `encounter roll <zone>`: complete zone names from loaded encounter tables.
+fn complete_encounter(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
+    // arg_index 0 = subcommand (show, roll, ls) — handled in Phase 25.4
+    if arg_index == 0 {
+        return Vec::new();
+    }
+
+    // Determine subcommand from input
+    let input = &app.input;
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    // parts[0] = "encounter" (or alias), parts[1] = subcommand, parts[2+] = args
+    let subcmd = parts.get(1).map(|s| s.to_lowercase());
+
+    match subcmd.as_deref() {
+        Some("show") | Some("roll") => {
+            if arg_index == 1 {
+                complete_zone_names(app, partial)
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Returns zone names from encounter tables matching the partial prefix (case-insensitive).
+fn complete_zone_names(app: &App, partial: &str) -> Vec<String> {
+    let gs = match &app.game_state {
+        Some(gs) => gs,
+        None => return Vec::new(),
+    };
+    let lower_partial = partial.to_lowercase();
+    gs.encounter_tables
+        .keys()
+        .filter(|name| name.starts_with(&lower_partial))
+        .cloned()
+        .collect()
 }
 
 /// Returns burg names from WorldMap matching the partial prefix (case-insensitive).
@@ -760,6 +800,122 @@ mod tests {
         let mut app = App::new();
         app.input = "sound play amb".to_string();
         let results = complete_sound(&app, 1, "amb");
+        assert!(results.is_empty());
+    }
+
+    // --- Encounter completion tests ---
+
+    /// Create an App with encounter tables containing test zones.
+    fn app_with_encounters() -> App {
+        use crate::encounters::EncounterTable;
+
+        let mut app = App::new();
+        let mut gs = GameState::new(Path::new("/tmp/test_campaign"));
+
+        gs.encounter_tables.insert(
+            "forest".to_string(),
+            EncounterTable {
+                zone_name: "forest".to_string(),
+                description: "A dark forest".to_string(),
+                entries: vec![],
+            },
+        );
+        gs.encounter_tables.insert(
+            "dungeon".to_string(),
+            EncounterTable {
+                zone_name: "dungeon".to_string(),
+                description: "A deep dungeon".to_string(),
+                entries: vec![],
+            },
+        );
+        gs.encounter_tables.insert(
+            "fortress".to_string(),
+            EncounterTable {
+                zone_name: "fortress".to_string(),
+                description: "An ancient fortress".to_string(),
+                entries: vec![],
+            },
+        );
+
+        app.game_state = Some(gs);
+        app
+    }
+
+    #[test]
+    fn test_encounter_show_completes_zone_names() {
+        let mut app = app_with_encounters();
+        app.input = "encounter show for".to_string();
+        let results = complete_encounter(&app, 1, "for");
+        assert!(results.contains(&"forest".to_string()));
+        assert!(results.contains(&"fortress".to_string()));
+        assert!(!results.contains(&"dungeon".to_string()));
+    }
+
+    #[test]
+    fn test_encounter_roll_completes_zone_names() {
+        let mut app = app_with_encounters();
+        app.input = "encounter roll for".to_string();
+        let results = complete_encounter(&app, 1, "for");
+        assert!(results.contains(&"forest".to_string()));
+        assert!(results.contains(&"fortress".to_string()));
+    }
+
+    #[test]
+    fn test_encounter_roll_case_insensitive() {
+        let mut app = app_with_encounters();
+        app.input = "encounter roll FOR".to_string();
+        let results = complete_encounter(&app, 1, "FOR");
+        assert!(results.contains(&"forest".to_string()));
+        assert!(results.contains(&"fortress".to_string()));
+    }
+
+    #[test]
+    fn test_encounter_show_empty_partial_returns_all() {
+        let mut app = app_with_encounters();
+        app.input = "encounter show ".to_string();
+        let results = complete_encounter(&app, 1, "");
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_encounter_show_no_match_returns_empty() {
+        let mut app = app_with_encounters();
+        app.input = "encounter show zzz".to_string();
+        let results = complete_encounter(&app, 1, "zzz");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_encounter_arg_index_0_returns_empty() {
+        let mut app = app_with_encounters();
+        app.input = "encounter sh".to_string();
+        let results = complete_encounter(&app, 0, "sh");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_encounter_ls_returns_empty() {
+        let mut app = app_with_encounters();
+        app.input = "encounter ls ".to_string();
+        let results = complete_encounter(&app, 1, "");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_encounter_no_game_state_returns_empty() {
+        let mut app = App::new();
+        app.input = "encounter roll for".to_string();
+        let results = complete_encounter(&app, 1, "for");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_encounter_no_tables_returns_empty() {
+        let mut app = App::new();
+        let gs = GameState::new(Path::new("/tmp/test_campaign"));
+        app.game_state = Some(gs);
+        app.input = "encounter show for".to_string();
+        let results = complete_encounter(&app, 1, "for");
         assert!(results.is_empty());
     }
 }
