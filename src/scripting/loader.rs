@@ -46,6 +46,76 @@ pub fn load_custom_commands(campaign_path: &Path) -> HashMap<String, LolScript> 
     commands
 }
 
+/// Parse `rules/commands/README.md` within a campaign directory.
+///
+/// Each `## command_name` heading followed by a description paragraph is extracted.
+/// Returns a map from command name (lowercased) to description text.
+/// Missing file or parse errors return an empty map.
+pub fn load_command_docs(campaign_path: &Path) -> HashMap<String, String> {
+    let readme_path = campaign_path
+        .join("rules")
+        .join("commands")
+        .join("README.md");
+
+    let content = match std::fs::read_to_string(&readme_path) {
+        Ok(s) => s,
+        Err(_) => return HashMap::new(),
+    };
+
+    parse_command_docs(&content)
+}
+
+/// Parse markdown content: extract `## command_name` headings and their description paragraphs.
+fn parse_command_docs(content: &str) -> HashMap<String, String> {
+    let mut docs = HashMap::new();
+    let mut current_command: Option<String> = None;
+    let mut current_desc = String::new();
+
+    for line in content.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            // Save previous command if any
+            if let Some(cmd) = current_command.take() {
+                let desc = current_desc.trim().to_string();
+                if !desc.is_empty() {
+                    docs.insert(cmd, desc);
+                }
+            }
+            current_command = Some(heading.trim().to_lowercase());
+            current_desc.clear();
+        } else if current_command.is_some() {
+            // Skip blank lines at the start of description
+            if current_desc.is_empty() && line.trim().is_empty() {
+                continue;
+            }
+            // Stop collecting at next heading of any level
+            if line.starts_with('#') {
+                if let Some(cmd) = current_command.take() {
+                    let desc = current_desc.trim().to_string();
+                    if !desc.is_empty() {
+                        docs.insert(cmd, desc);
+                    }
+                }
+                current_desc.clear();
+                continue;
+            }
+            if !current_desc.is_empty() {
+                current_desc.push(' ');
+            }
+            current_desc.push_str(line.trim());
+        }
+    }
+
+    // Save last command
+    if let Some(cmd) = current_command {
+        let desc = current_desc.trim().to_string();
+        if !desc.is_empty() {
+            docs.insert(cmd, desc);
+        }
+    }
+
+    docs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,5 +239,83 @@ mod tests {
         let commands = load_custom_commands(dir.path());
         assert_eq!(commands.len(), 1);
         assert!(commands.contains_key("valid"));
+    }
+
+    // --- parse_command_docs tests ---
+
+    #[test]
+    fn test_parse_command_docs_basic() {
+        let content = "# Custom Commands\n\n## smite\n\nDeal divine damage to a target.\n\n## heal\n\nRestore hit points to an ally.\n";
+        let docs = parse_command_docs(content);
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs["smite"], "Deal divine damage to a target.");
+        assert_eq!(docs["heal"], "Restore hit points to an ally.");
+    }
+
+    #[test]
+    fn test_parse_command_docs_multiline_description() {
+        let content = "## smite\n\nDeal divine damage\nto a target creature.\n";
+        let docs = parse_command_docs(content);
+        assert_eq!(docs["smite"], "Deal divine damage to a target creature.");
+    }
+
+    #[test]
+    fn test_parse_command_docs_no_headings() {
+        let content = "# Just a title\n\nSome text but no ## headings.\n";
+        let docs = parse_command_docs(content);
+        assert!(docs.is_empty());
+    }
+
+    #[test]
+    fn test_parse_command_docs_empty_description() {
+        let content = "## smite\n\n## heal\n\nRestore HP.\n";
+        let docs = parse_command_docs(content);
+        assert_eq!(docs.len(), 1);
+        assert!(!docs.contains_key("smite"));
+        assert_eq!(docs["heal"], "Restore HP.");
+    }
+
+    #[test]
+    fn test_parse_command_docs_lowercases_names() {
+        let content = "## Smite\n\nDamage.\n\n## HEAL\n\nHeal.\n";
+        let docs = parse_command_docs(content);
+        assert!(docs.contains_key("smite"));
+        assert!(docs.contains_key("heal"));
+    }
+
+    #[test]
+    fn test_parse_command_docs_empty_content() {
+        let docs = parse_command_docs("");
+        assert!(docs.is_empty());
+    }
+
+    #[test]
+    fn test_parse_command_docs_stops_at_other_heading() {
+        let content = "## smite\n\nDeal damage.\n\n# Other Section\n\nNot part of smite.\n";
+        let docs = parse_command_docs(content);
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs["smite"], "Deal damage.");
+    }
+
+    #[test]
+    fn test_load_command_docs_missing_readme() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let docs = load_command_docs(dir.path());
+        assert!(docs.is_empty());
+    }
+
+    #[test]
+    fn test_load_command_docs_from_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let commands_dir = dir.path().join("rules").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(
+            commands_dir.join("README.md"),
+            "# Commands\n\n## fireball\n\nLaunch a ball of fire.\n",
+        )
+        .unwrap();
+        let docs = load_command_docs(dir.path());
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs["fireball"], "Launch a ball of fire.");
     }
 }

@@ -20,6 +20,7 @@ pub struct GameState {
     pub rules: Option<CampaignRules>,
     pub schema: Option<CampaignSchema>,
     pub custom_commands: HashMap<String, LolScript>,
+    pub custom_command_docs: HashMap<String, String>,
     pub encounter_tables: HashMap<String, EncounterTable>,
     pub search_index: SearchIndex,
 }
@@ -39,6 +40,7 @@ impl GameState {
             rules: None,
             schema: None,
             custom_commands: HashMap::new(),
+            custom_command_docs: HashMap::new(),
             encounter_tables: HashMap::new(),
             search_index: SearchIndex::new(),
         }
@@ -136,6 +138,9 @@ impl GameState {
 
         // Load custom commands from rules/commands/*.lol
         gs.custom_commands = crate::scripting::loader::load_custom_commands(path);
+
+        // Load custom command docs from rules/commands/README.md
+        gs.custom_command_docs = crate::scripting::loader::load_command_docs(path);
 
         // Load encounter tables from npc/encounters/*.toml
         let encounters_dir = path.join("npc").join("encounters");
