@@ -90,6 +90,11 @@ impl PersistenceLayer {
         git::reapply(&self.repo, commit_hash)
     }
 
+    /// Commit all current changes with the given message.
+    pub fn commit(&self, message: &str) -> color_eyre::Result<()> {
+        git::commit(&self.repo, message)
+    }
+
     /// Get the last n commits from the log.
     pub fn history(&self, n: usize) -> color_eyre::Result<Vec<git::CommitInfo>> {
         git::log(&self.repo, n)

@@ -7,6 +7,7 @@ pub const LOAD: &str = "load";
 pub const MAP: &str = "map";
 pub const NEW: &str = "new";
 pub const NEXT: &str = "next";
+pub const NOTE: &str = "note";
 pub const PREV: &str = "prev";
 pub const QUIT: &str = "quit";
 pub const ROLL: &str = "roll";
@@ -23,7 +24,7 @@ pub const SPAWN: &str = "spawn";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
 
-pub const COMMANDS: [&str; 24] = [
-    BESTIARY, COMBAT, ENCOUNTER, HELP, HISTORY, INIT, LIST, LOAD, MAP, NEW, NEXT, PREV, QUIT,
-    REDO, ROLL, SEARCH, SET, SHOW, SOUND, SPAWN, STATUS, TARGET, UNDO, VALIDATE,
+pub const COMMANDS: [&str; 25] = [
+    BESTIARY, COMBAT, ENCOUNTER, HELP, HISTORY, INIT, LIST, LOAD, MAP, NEW, NEXT, NOTE, PREV,
+    QUIT, REDO, ROLL, SEARCH, SET, SHOW, SOUND, SPAWN, STATUS, TARGET, UNDO, VALIDATE,
 ];

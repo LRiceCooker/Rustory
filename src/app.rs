@@ -324,6 +324,10 @@ impl App {
             self.handle_combat_command(args);
             return;
         }
+        if command == mapping::NOTE {
+            self.handle_note_command(args);
+            return;
+        }
         if command == mapping::INIT || command == mapping::NEXT || command == mapping::PREV
             || command == mapping::STATUS || command == mapping::TARGET
         {
@@ -2425,6 +2429,101 @@ impl App {
             format!("Target set to: {args}"),
             Style::default().fg(Color::Green),
         )]));
+    }
+
+    fn handle_note_command(&mut self, args: &str) {
+        let campaign_path = match &self.game_state {
+            Some(gs) => gs.campaign_path.clone(),
+            None => {
+                self.apply_command_result(CommandResult::Error(
+                    "No campaign loaded.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        if args.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![
+                StyledLine::plain("Usage:"),
+                StyledLine::plain("  note <text>     — add a timestamped note"),
+                StyledLine::plain("  note list       — show today's notes"),
+                StyledLine::plain("  note history    — list all note files"),
+            ]));
+            return;
+        }
+
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let subcmd = parts[0];
+
+        match subcmd {
+            "list" => {
+                match crate::notes::writer::list_today(&campaign_path) {
+                    Some(content) => {
+                        let lines: Vec<StyledLine> = content
+                            .lines()
+                            .map(|l| StyledLine::new(l.to_string(), Style::default().fg(Color::Blue)))
+                            .collect();
+                        if lines.is_empty() {
+                            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                                "No notes for today.".to_string(),
+                                Style::default().fg(Color::Yellow),
+                            )]));
+                        } else {
+                            self.apply_command_result(CommandResult::Output(lines));
+                        }
+                    }
+                    None => {
+                        self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                            "No notes for today.".to_string(),
+                            Style::default().fg(Color::Yellow),
+                        )]));
+                    }
+                }
+            }
+            "history" => {
+                let files = crate::notes::writer::list_files(&campaign_path);
+                if files.is_empty() {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        "No session notes found.".to_string(),
+                        Style::default().fg(Color::Yellow),
+                    )]));
+                } else {
+                    let mut lines = vec![StyledLine::new(
+                        format!("Session notes ({} file(s)):", files.len()),
+                        Style::default().fg(Color::Cyan),
+                    )];
+                    for f in &files {
+                        lines.push(StyledLine::plain(format!("  {f}")));
+                    }
+                    self.apply_command_result(CommandResult::Output(lines));
+                }
+            }
+            _ => {
+                // note <text> — the entire args is the note text
+                match crate::notes::writer::append(&campaign_path, args) {
+                    Ok(date) => {
+                        // Git commit the note
+                        if let Some(ref pl) = self.persistence {
+                            let msg = if args.len() > 50 {
+                                format!("Note: {}...", &args[..50])
+                            } else {
+                                format!("Note: {args}")
+                            };
+                            let _ = pl.commit(&msg);
+                        }
+                        self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                            format!("Note added to {date}.md"),
+                            Style::default().fg(Color::Green),
+                        )]));
+                    }
+                    Err(e) => {
+                        self.apply_command_result(CommandResult::Error(
+                            format!("Failed to write note: {e}"),
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     fn handle_history_command(&mut self, args: &str) {
@@ -6046,5 +6145,120 @@ mod tests {
         let marker_pos2 = content2.find(">>").expect("Should have >> marker after next");
         let goblin_pos = content2.find("Goblin").expect("Should have Goblin");
         assert!(marker_pos2 < goblin_pos, ">> should be before Goblin (current) after next");
+    }
+
+    // ---- Note command tests ----
+
+    fn setup_note_campaign(dir: &TempDir, name: &str) -> std::path::PathBuf {
+        let campaign = dir.path().join(name);
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"NoteTest\"\n",
+        ).unwrap();
+        campaign
+    }
+
+    #[test]
+    fn test_note_no_campaign_error() {
+        let mut app = App::new();
+        app.running = true;
+        app.dispatch_command("note hello");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No campaign loaded"), "Should show error. Got: {output}");
+    }
+
+    #[test]
+    fn test_note_no_args_shows_help() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_note_campaign(&dir, "note_help");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("note");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
+    }
+
+    #[test]
+    fn test_note_adds_note() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_note_campaign(&dir, "note_add");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("note The party entered the cave");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("Note added"), "Should confirm note. Got: {output}");
+
+        // Verify file exists
+        let notes_dir = campaign.join("notes");
+        assert!(notes_dir.exists(), "notes/ dir should exist");
+    }
+
+    #[test]
+    fn test_note_list_shows_today() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_note_campaign(&dir, "note_list");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        app.dispatch_command("note The party entered the cave");
+        app.messages.clear();
+
+        app.dispatch_command("note list");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("party entered the cave"), "Should show note content. Got: {output}");
+    }
+
+    #[test]
+    fn test_note_list_no_notes() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_note_campaign(&dir, "note_empty");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("note list");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No notes"), "Should show no notes. Got: {output}");
+    }
+
+    #[test]
+    fn test_note_history_shows_files() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_note_campaign(&dir, "note_history");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // Create a note (generates today's file)
+        app.dispatch_command("note Test");
+        app.messages.clear();
+
+        app.dispatch_command("note history");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains(".md"), "Should show note file. Got: {output}");
+        assert!(output.contains("1 file"), "Should show file count. Got: {output}");
+    }
+
+    #[test]
+    fn test_note_history_no_files() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_note_campaign(&dir, "note_hist_empty");
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        app.dispatch_command("note history");
+        let output: String = app.messages.iter().map(|m| &m.text).cloned().collect::<Vec<_>>().join("\n");
+        assert!(output.contains("No session notes"), "Should show no notes. Got: {output}");
     }
 }
