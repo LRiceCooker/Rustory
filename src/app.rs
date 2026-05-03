@@ -105,6 +105,7 @@ pub struct App {
     pub redo_stack: Vec<String>,
     pub initiative_tracker: Option<InitiativeTracker>,
     pub current_target: Option<String>,
+    pub autocomplete_registry: std::collections::HashMap<&'static str, crate::commands::autocomplete::ArgCompleter>,
 }
 
 impl Default for App {
@@ -142,6 +143,7 @@ impl App {
             redo_stack: Vec::new(),
             initiative_tracker: None,
             current_target: None,
+            autocomplete_registry: crate::commands::autocomplete::build_registry(),
         }
     }
 
@@ -4079,6 +4081,64 @@ impl App {
         if self.input.is_empty() {
             return None;
         }
+
+        // Determine if we're completing the first word (command name) or arguments
+        let has_space = self.input.contains(' ');
+
+        if !has_space {
+            // First word: command name completion (existing logic)
+            return self.autocomplete_command_name();
+        }
+
+        // Argument completion: parse command name and current argument
+        let parts: Vec<&str> = self.input.splitn(2, ' ').collect();
+        let cmd_name = parts[0].to_lowercase();
+        let args_str = parts.get(1).unwrap_or(&"");
+
+        // Resolve alias to canonical command name for registry lookup
+        let resolved = crate::commands::mapping::resolve_alias(&cmd_name);
+        let resolved_parts: Vec<&str> = resolved.splitn(2, ' ').collect();
+        let canonical_cmd = resolved_parts[0];
+
+        if let Some(completer) = self.autocomplete_registry.get(canonical_cmd) {
+            // Combine any extra words from alias expansion with user args
+            let full_args = if resolved_parts.len() > 1 {
+                if args_str.is_empty() {
+                    resolved_parts[1].to_string()
+                } else {
+                    format!("{} {args_str}", resolved_parts[1])
+                }
+            } else {
+                args_str.to_string()
+            };
+
+            // Split args to determine arg_index and partial text
+            let arg_tokens: Vec<&str> = full_args.split_whitespace().collect();
+            let trailing_space = full_args.ends_with(' ');
+
+            let (arg_index, partial) = if full_args.trim().is_empty() || trailing_space {
+                // Cursor is after a space: completing a new argument
+                (arg_tokens.len(), "")
+            } else {
+                // Cursor is in the middle of typing an argument
+                let partial = arg_tokens.last().unwrap_or(&"");
+                (arg_tokens.len().saturating_sub(1), *partial)
+            };
+
+            let completions = completer(self, arg_index, partial);
+            if let Some(first) = completions.first() {
+                // Return the suffix to append (what remains after partial)
+                if first.len() > partial.len() {
+                    return Some(first[partial.len()..].to_string());
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Complete command name (first word) from built-in commands, aliases, and custom commands.
+    fn autocomplete_command_name(&self) -> Option<String> {
         let input_lower = self.input.to_lowercase();
 
         // Try built-in commands + aliases
@@ -5328,6 +5388,118 @@ mod tests {
         app.on_key(KeyEvent::from(KeyCode::Tab));
         assert_eq!(app.input, "smite");
         assert_eq!(app.cursor_position, 5);
+    }
+
+    // --- Argument-level autocomplete tests ---
+
+    #[test]
+    fn test_arg_autocomplete_hint_shows_after_command_name() {
+        let mut app = App::new();
+        // Register a test completer for "show" that returns ["thorin", "thranduil"]
+        app.autocomplete_registry.insert(
+            "show",
+            (|_app: &App, _arg_index: usize, partial: &str| -> Vec<String> {
+                let names = vec!["thorin".to_string(), "thranduil".to_string()];
+                names
+                    .into_iter()
+                    .filter(|n| n.starts_with(&partial.to_lowercase()))
+                    .collect()
+            }) as crate::commands::autocomplete::ArgCompleter,
+        );
+
+        // "show th" should hint "orin" (suffix of "thorin" after "th")
+        app.input = "show th".to_string();
+        assert_eq!(app.autocomplete_hint(), Some("orin".to_string()));
+
+        // "show thr" should hint "anduil" (suffix of "thranduil" after "thr")
+        app.input = "show thr".to_string();
+        assert_eq!(app.autocomplete_hint(), Some("anduil".to_string()));
+
+        // "show z" should return None (no match)
+        app.input = "show z".to_string();
+        assert_eq!(app.autocomplete_hint(), None);
+    }
+
+    #[test]
+    fn test_arg_autocomplete_tab_fills_argument() {
+        let mut app = App::new();
+        app.running = true;
+        // Register a test completer for "show"
+        app.autocomplete_registry.insert(
+            "show",
+            (|_app: &App, _arg_index: usize, partial: &str| -> Vec<String> {
+                let names = vec!["thorin".to_string()];
+                names
+                    .into_iter()
+                    .filter(|n| n.starts_with(&partial.to_lowercase()))
+                    .collect()
+            }) as crate::commands::autocomplete::ArgCompleter,
+        );
+
+        app.input = "show th".to_string();
+        app.cursor_position = 7;
+
+        // Tab should fill "show thorin"
+        app.on_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.input, "show thorin");
+        assert_eq!(app.cursor_position, 11);
+    }
+
+    #[test]
+    fn test_arg_autocomplete_passes_correct_arg_index() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CAPTURED_INDEX: AtomicUsize = AtomicUsize::new(999);
+
+        let mut app = App::new();
+        app.autocomplete_registry.insert(
+            "set",
+            (|_app: &App, arg_index: usize, _partial: &str| -> Vec<String> {
+                CAPTURED_INDEX.store(arg_index, Ordering::SeqCst);
+                vec!["result".to_string()]
+            }) as crate::commands::autocomplete::ArgCompleter,
+        );
+
+        // "set " → arg_index 0, empty partial
+        app.input = "set ".to_string();
+        app.autocomplete_hint();
+        assert_eq!(CAPTURED_INDEX.load(Ordering::SeqCst), 0);
+
+        // "set thorin " → arg_index 1, empty partial
+        app.input = "set thorin ".to_string();
+        app.autocomplete_hint();
+        assert_eq!(CAPTURED_INDEX.load(Ordering::SeqCst), 1);
+
+        // "set thorin re" → arg_index 1, partial "re"
+        app.input = "set thorin re".to_string();
+        app.autocomplete_hint();
+        assert_eq!(CAPTURED_INDEX.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_arg_autocomplete_no_hint_for_unknown_command() {
+        let mut app = App::new();
+        // "foobar arg" — foobar not in registry, should return None
+        app.input = "foobar arg".to_string();
+        assert_eq!(app.autocomplete_hint(), None);
+    }
+
+    #[test]
+    fn test_arg_autocomplete_works_with_alias() {
+        let mut app = App::new();
+        // "s" is alias for "show" — register completer on "show"
+        app.autocomplete_registry.insert(
+            "show",
+            (|_app: &App, _arg_index: usize, partial: &str| -> Vec<String> {
+                vec!["thorin".to_string()]
+                    .into_iter()
+                    .filter(|n| n.starts_with(&partial.to_lowercase()))
+                    .collect()
+            }) as crate::commands::autocomplete::ArgCompleter,
+        );
+
+        // "s th" → alias "s" resolves to "show", should complete "thorin"
+        app.input = "s th".to_string();
+        assert_eq!(app.autocomplete_hint(), Some("orin".to_string()));
     }
 
     // --- search command tests ---
