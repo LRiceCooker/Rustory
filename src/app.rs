@@ -674,6 +674,7 @@ impl App {
                 "  new   — create a new campaign from a template (e.g. new my_game sample)",
             ),
             StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
+            StyledLine::plain("  calc  — evaluate math (e.g. calc 15+3+4, calc 2*1d6)"),
             StyledLine::plain("  cat      — display a file (e.g. cat npc/goblin_king/dialogues.md)"),
             StyledLine::plain("  clear    — clear the output history"),
             StyledLine::plain("  show     — display character sheet (e.g. show thorin)"),

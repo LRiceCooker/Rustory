@@ -5,6 +5,7 @@ use rand::RngCore;
 use ratatui::style::{Color, Style};
 
 use super::mapping;
+use super::parsers::calc;
 use super::parsers::roll;
 use crate::scripting::loader::LolScript;
 
@@ -45,6 +46,7 @@ fn help() -> CommandResult {
             "  new   — create a new campaign from a template (e.g. new my_game sample)",
         ),
         StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
+        StyledLine::plain("  calc  — evaluate math (e.g. calc 15+3+4, calc 2*1d6)"),
         StyledLine::plain("  sound — play audio (e.g. sound play ambiance/tavern.mp3)"),
         StyledLine::plain("  quit  — exit Rustory"),
     ])
@@ -86,6 +88,28 @@ fn roll_dice(args: &str, rng: &mut dyn RngCore) -> CommandResult {
     }
 }
 
+fn calc_expr(args: &str, rng: &mut dyn RngCore) -> CommandResult {
+    let args = args.trim();
+    if args.is_empty() {
+        return CommandResult::Error("Usage: calc <expression> (e.g. calc 15+3+4)".to_string());
+    }
+
+    match calc::evaluate(args, rng) {
+        Ok((result, roll_descriptions)) => {
+            let mut lines = Vec::new();
+            for desc in &roll_descriptions {
+                lines.push(StyledLine::plain(format!("  {desc}")));
+            }
+            lines.push(StyledLine::plain(format!(
+                "= {}",
+                calc::format_result(result)
+            )));
+            CommandResult::Output(lines)
+        }
+        Err(e) => CommandResult::Error(format!("calc: {e}")),
+    }
+}
+
 pub fn dispatch(
     input: &str,
     rng: &mut dyn RngCore,
@@ -97,6 +121,7 @@ pub fn dispatch(
 
     // Built-in commands ALWAYS take priority (security)
     match command {
+        mapping::CALC => calc_expr(args, rng),
         mapping::CAT => CommandResult::Error("cat command must be handled by the app".to_string()),
         mapping::CLEAR => {
             CommandResult::Error("clear command must be handled by the app".to_string())
