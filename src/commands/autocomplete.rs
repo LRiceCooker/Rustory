@@ -25,7 +25,7 @@ pub fn build_registry() -> HashMap<&'static str, ArgCompleter> {
 
     // Commands with subcommands
     registry.insert("ls", complete_stub as ArgCompleter);
-    registry.insert("sound", complete_stub as ArgCompleter);
+    registry.insert("sound", complete_sound as ArgCompleter);
     registry.insert("map", complete_map as ArgCompleter);
     registry.insert("encounter", complete_stub as ArgCompleter);
     registry.insert("combat", complete_stub as ArgCompleter);
@@ -196,6 +196,53 @@ fn complete_map(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
             } else if arg_index == 2 {
                 // Complete burg names from WorldMap
                 complete_burg_names(app, partial)
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Completer for `sound` subcommands.
+/// `sound play <path>` / `sound loop <path>`: complete from SoundLibrary entries (relative paths).
+/// `sound list <subfolder>`: complete subfolder names.
+fn complete_sound(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
+    // arg_index 0 = subcommand (play, loop, list, etc.) — handled in Phase 25.4
+    if arg_index == 0 {
+        return Vec::new();
+    }
+
+    // Determine subcommand, accounting for aliases (e.g., "play" → "sound play")
+    let input = &app.input;
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    let first_word = parts
+        .first()
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    let resolved = crate::commands::mapping::resolve_alias(&first_word);
+    let resolved_parts: Vec<&str> = resolved.split_whitespace().collect();
+
+    let subcmd = if resolved_parts.len() > 1 {
+        // Multi-word alias like "play" → "sound play"
+        Some(resolved_parts[1].to_string())
+    } else {
+        // Direct "sound" command, subcommand is the next word from input
+        parts.get(1).map(|s| s.to_lowercase())
+    };
+
+    match subcmd.as_deref() {
+        Some("play") | Some("loop") => {
+            if arg_index == 1 {
+                app.sound_library.complete_paths(partial)
+            } else {
+                Vec::new()
+            }
+        }
+        Some("list") => {
+            if arg_index == 1 {
+                app.sound_library.complete_subfolders(partial)
             } else {
                 Vec::new()
             }
@@ -467,6 +514,105 @@ mod tests {
         let mut app = app_with_characters();
         app.input = "map wh".to_string();
         let results = complete_map(&app, 0, "wh");
+        assert!(results.is_empty());
+    }
+
+    // --- Sound completion tests ---
+
+    /// Create an App with a SoundLibrary from a temp directory.
+    fn app_with_sound_library() -> (App, tempfile::TempDir) {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("ambiance")).unwrap();
+        fs::create_dir_all(root.join("combat")).unwrap();
+        fs::write(root.join("ambiance/tavern.mp3"), b"fake").unwrap();
+        fs::write(root.join("ambiance/forest.ogg"), b"fake").unwrap();
+        fs::write(root.join("combat/battle.wav"), b"fake").unwrap();
+        fs::write(root.join("theme.flac"), b"fake").unwrap();
+
+        let mut app = App::new();
+        app.sound_library =
+            crate::audio::library::SoundLibrary::scan(root).unwrap();
+        (app, dir)
+    }
+
+    #[test]
+    fn test_sound_play_completes_paths() {
+        let (mut app, _dir) = app_with_sound_library();
+        app.input = "sound play ambiance/".to_string();
+        let results = complete_sound(&app, 1, "ambiance/");
+        assert!(results.contains(&"ambiance/tavern.mp3".to_string()));
+        assert!(results.contains(&"ambiance/forest.ogg".to_string()));
+    }
+
+    #[test]
+    fn test_sound_play_completes_partial_path() {
+        let (mut app, _dir) = app_with_sound_library();
+        app.input = "sound play ambiance/t".to_string();
+        let results = complete_sound(&app, 1, "ambiance/t");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "ambiance/tavern.mp3");
+    }
+
+    #[test]
+    fn test_sound_loop_completes_paths() {
+        let (mut app, _dir) = app_with_sound_library();
+        app.input = "sound loop combat/".to_string();
+        let results = complete_sound(&app, 1, "combat/");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "combat/battle.wav");
+    }
+
+    #[test]
+    fn test_sound_list_completes_subfolders() {
+        let (mut app, _dir) = app_with_sound_library();
+        app.input = "sound list a".to_string();
+        let results = complete_sound(&app, 1, "a");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "ambiance");
+    }
+
+    #[test]
+    fn test_sound_list_empty_partial_returns_all_dirs() {
+        let (mut app, _dir) = app_with_sound_library();
+        app.input = "sound list ".to_string();
+        let results = complete_sound(&app, 1, "");
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&"ambiance".to_string()));
+        assert!(results.contains(&"combat".to_string()));
+    }
+
+    #[test]
+    fn test_sound_play_via_alias_completes_paths() {
+        let (mut app, _dir) = app_with_sound_library();
+        app.input = "play ambiance/".to_string();
+        let results = complete_sound(&app, 1, "ambiance/");
+        assert!(results.contains(&"ambiance/tavern.mp3".to_string()));
+    }
+
+    #[test]
+    fn test_sound_arg_index_0_returns_empty() {
+        let (mut app, _dir) = app_with_sound_library();
+        app.input = "sound p".to_string();
+        let results = complete_sound(&app, 0, "p");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_sound_unknown_subcommand_returns_empty() {
+        let (mut app, _dir) = app_with_sound_library();
+        app.input = "sound stop ".to_string();
+        let results = complete_sound(&app, 1, "");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_sound_no_library_returns_empty() {
+        let mut app = App::new();
+        app.input = "sound play amb".to_string();
+        let results = complete_sound(&app, 1, "amb");
         assert!(results.is_empty());
     }
 }

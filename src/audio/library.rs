@@ -159,6 +159,28 @@ impl SoundLibrary {
         }
     }
 
+    /// Return audio file paths matching a prefix (case-insensitive).
+    /// Used for `sound play` / `sound loop` autocomplete.
+    pub fn complete_paths(&self, partial: &str) -> Vec<String> {
+        let lower_partial = partial.to_lowercase();
+        self.entries
+            .iter()
+            .filter(|e| !e.is_dir && e.path.to_lowercase().starts_with(&lower_partial))
+            .map(|e| e.path.clone())
+            .collect()
+    }
+
+    /// Return subfolder paths matching a prefix (case-insensitive).
+    /// Used for `sound list` autocomplete.
+    pub fn complete_subfolders(&self, partial: &str) -> Vec<String> {
+        let lower_partial = partial.to_lowercase();
+        self.entries
+            .iter()
+            .filter(|e| e.is_dir && e.path.to_lowercase().starts_with(&lower_partial))
+            .map(|e| e.path.clone())
+            .collect()
+    }
+
     /// Returns true if the library has no entries.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -445,7 +467,10 @@ mod tests {
 
         match lib.resolve_fuzzy("t") {
             FuzzyResult::Ambiguous(matches) => {
-                assert!(matches.len() >= 2, "Expected at least 2 matches, got {matches:?}");
+                assert!(
+                    matches.len() >= 2,
+                    "Expected at least 2 matches, got {matches:?}"
+                );
             }
             other => panic!("Expected Ambiguous, got {other:?}"),
         }
@@ -460,5 +485,107 @@ mod tests {
             FuzzyResult::NotFound => {}
             other => panic!("Expected NotFound, got {other:?}"),
         }
+    }
+
+    // --- complete_paths tests ---
+
+    #[test]
+    fn test_complete_paths_prefix_match() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_paths("ambiance/");
+        assert!(results.contains(&"ambiance/tavern.mp3".to_string()));
+        assert!(results.contains(&"ambiance/forest.ogg".to_string()));
+        assert!(!results.iter().any(|r| r.starts_with("combat/")));
+    }
+
+    #[test]
+    fn test_complete_paths_partial_filename() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_paths("ambiance/t");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "ambiance/tavern.mp3");
+    }
+
+    #[test]
+    fn test_complete_paths_case_insensitive() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_paths("AMBIANCE/");
+        assert!(results.contains(&"ambiance/tavern.mp3".to_string()));
+    }
+
+    #[test]
+    fn test_complete_paths_empty_partial_returns_all_files() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_paths("");
+        assert_eq!(results.len(), 4); // 4 audio files total
+    }
+
+    #[test]
+    fn test_complete_paths_excludes_directories() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_paths("ambiance");
+        // Should match files like "ambiance/tavern.mp3", not the directory "ambiance" itself
+        assert!(results.iter().all(|r| r.contains('/')));
+    }
+
+    #[test]
+    fn test_complete_paths_no_match() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_paths("nonexistent/");
+        assert!(results.is_empty());
+    }
+
+    // --- complete_subfolders tests ---
+
+    #[test]
+    fn test_complete_subfolders_prefix_match() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_subfolders("a");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "ambiance");
+    }
+
+    #[test]
+    fn test_complete_subfolders_empty_returns_all_dirs() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_subfolders("");
+        assert_eq!(results.len(), 2); // ambiance, combat
+        assert!(results.contains(&"ambiance".to_string()));
+        assert!(results.contains(&"combat".to_string()));
+    }
+
+    #[test]
+    fn test_complete_subfolders_no_match() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_subfolders("zzz");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_complete_subfolders_excludes_files() {
+        let dir = create_test_sound_dir();
+        let lib = SoundLibrary::scan(dir.path()).unwrap();
+
+        let results = lib.complete_subfolders("t");
+        // "theme.flac" is a file, should not appear
+        assert!(results.is_empty());
     }
 }
