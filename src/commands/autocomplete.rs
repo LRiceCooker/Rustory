@@ -24,20 +24,25 @@ pub fn build_registry() -> HashMap<&'static str, ArgCompleter> {
     registry.insert("give", complete_character_name as ArgCompleter);
 
     // Commands with subcommands
-    registry.insert("ls", complete_stub as ArgCompleter);
+    registry.insert("ls", complete_ls as ArgCompleter);
     registry.insert("sound", complete_sound as ArgCompleter);
     registry.insert("map", complete_map as ArgCompleter);
     registry.insert("encounter", complete_encounter as ArgCompleter);
-    registry.insert("combat", complete_stub as ArgCompleter);
-    registry.insert("init", complete_stub as ArgCompleter);
-    registry.insert("note", complete_stub as ArgCompleter);
+    registry.insert("combat", complete_combat as ArgCompleter);
+    registry.insert("init", complete_init as ArgCompleter);
+    registry.insert("note", complete_note as ArgCompleter);
 
     registry
 }
 
-/// Stub completer — returns no completions. Will be replaced by real completers in Phase 25.3+.
-fn complete_stub(_app: &App, _arg_index: usize, _partial: &str) -> Vec<String> {
-    Vec::new()
+/// Complete from a static list of subcommands, matching by prefix (case-insensitive).
+fn complete_static(subcommands: &[&str], partial: &str) -> Vec<String> {
+    let lower = partial.to_lowercase();
+    subcommands
+        .iter()
+        .filter(|s| s.starts_with(&lower))
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Returns all player + NPC names from GameState matching the partial prefix (case-insensitive).
@@ -162,20 +167,68 @@ fn complete_spawn(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
         .collect()
 }
 
+/// Static subcommand lists for commands that take subcommands.
+/// Used for arg_index 0 completion (the first argument after the command name).
+
+const LS_SUBCOMMANDS: &[&str] = &["commands", "encounters", "npc", "players", "sound"];
+const SOUND_SUBCOMMANDS: &[&str] = &[
+    "list", "loop", "pause", "play", "resume", "search", "status", "stop", "volume",
+];
+const MAP_SUBCOMMANDS: &[&str] = &["info", "list", "move", "near", "route", "search", "where"];
+const ENCOUNTER_SUBCOMMANDS: &[&str] = &["ls", "roll", "show"];
+const COMBAT_SUBCOMMANDS: &[&str] = &["end", "start"];
+const NOTE_SUBCOMMANDS: &[&str] = &["history", "list"];
+const INIT_SUBCOMMANDS: &[&str] = &["add", "remove", "roll"];
+
 /// Static list of `map list` subcommands.
 const MAP_LIST_SUBCOMMANDS: &[&str] = &["burgs", "cultures", "states"];
 
+/// Completer for `ls` subcommands.
+fn complete_ls(_app: &App, arg_index: usize, partial: &str) -> Vec<String> {
+    if arg_index == 0 {
+        complete_static(LS_SUBCOMMANDS, partial)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Completer for `combat` subcommands.
+fn complete_combat(_app: &App, arg_index: usize, partial: &str) -> Vec<String> {
+    if arg_index == 0 {
+        complete_static(COMBAT_SUBCOMMANDS, partial)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Completer for `note` subcommands.
+fn complete_note(_app: &App, arg_index: usize, partial: &str) -> Vec<String> {
+    if arg_index == 0 {
+        complete_static(NOTE_SUBCOMMANDS, partial)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Completer for `init` subcommands.
+fn complete_init(_app: &App, arg_index: usize, partial: &str) -> Vec<String> {
+    if arg_index == 0 {
+        complete_static(INIT_SUBCOMMANDS, partial)
+    } else {
+        Vec::new()
+    }
+}
+
 /// Completer for `map` subcommands.
+/// - arg_index 0: complete subcommand name (info, list, move, near, route, search, where)
 /// - `map where <character>`: character names
 /// - `map move <character> <location>`: character names then burg names
 /// - `map info/search/near <burg>`: burg names
 /// - `map route <from> <to>`: burg names for both args
 /// - `map list [burgs/states/cultures]`: static subcommand list
 fn complete_map(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
-    // arg_index 0 = subcommand (where, move, info, etc.) — handled in Phase 25.4
-    // arg_index 1+ depends on subcommand
     if arg_index == 0 {
-        return Vec::new();
+        return complete_static(MAP_SUBCOMMANDS, partial);
     }
 
     // We need to figure out which subcommand is being used.
@@ -240,12 +293,12 @@ fn complete_map(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
 }
 
 /// Completer for `sound` subcommands.
-/// `sound play <path>` / `sound loop <path>`: complete from SoundLibrary entries (relative paths).
-/// `sound list <subfolder>`: complete subfolder names.
+/// - arg_index 0: complete subcommand name (list, loop, pause, play, resume, search, status, stop, volume)
+/// - `sound play <path>` / `sound loop <path>`: complete from SoundLibrary entries (relative paths).
+/// - `sound list <subfolder>`: complete subfolder names.
 fn complete_sound(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
-    // arg_index 0 = subcommand (play, loop, list, etc.) — handled in Phase 25.4
     if arg_index == 0 {
-        return Vec::new();
+        return complete_static(SOUND_SUBCOMMANDS, partial);
     }
 
     // Determine subcommand, accounting for aliases (e.g., "play" → "sound play")
@@ -287,11 +340,11 @@ fn complete_sound(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
 }
 
 /// Completer for `encounter` subcommands.
-/// `encounter show <zone>` / `encounter roll <zone>`: complete zone names from loaded encounter tables.
+/// - arg_index 0: complete subcommand name (ls, roll, show)
+/// - `encounter show <zone>` / `encounter roll <zone>`: complete zone names from loaded encounter tables.
 fn complete_encounter(app: &App, arg_index: usize, partial: &str) -> Vec<String> {
-    // arg_index 0 = subcommand (show, roll, ls) — handled in Phase 25.4
     if arg_index == 0 {
-        return Vec::new();
+        return complete_static(ENCOUNTER_SUBCOMMANDS, partial);
     }
 
     // Determine subcommand from input
@@ -577,11 +630,11 @@ mod tests {
     }
 
     #[test]
-    fn test_map_arg_index_0_returns_empty() {
-        let mut app = app_with_characters();
-        app.input = "map wh".to_string();
+    fn test_map_arg_index_0_completes_subcommands() {
+        let app = App::new();
         let results = complete_map(&app, 0, "wh");
-        assert!(results.is_empty());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "where");
     }
 
     /// Create an App with a WorldMap containing test burgs.
@@ -780,11 +833,12 @@ mod tests {
     }
 
     #[test]
-    fn test_sound_arg_index_0_returns_empty() {
-        let (mut app, _dir) = app_with_sound_library();
-        app.input = "sound p".to_string();
+    fn test_sound_arg_index_0_completes_subcommands() {
+        let (app, _dir) = app_with_sound_library();
         let results = complete_sound(&app, 0, "p");
-        assert!(results.is_empty());
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&"pause".to_string()));
+        assert!(results.contains(&"play".to_string()));
     }
 
     #[test]
@@ -886,11 +940,11 @@ mod tests {
     }
 
     #[test]
-    fn test_encounter_arg_index_0_returns_empty() {
-        let mut app = app_with_encounters();
-        app.input = "encounter sh".to_string();
+    fn test_encounter_arg_index_0_completes_subcommands() {
+        let app = App::new();
         let results = complete_encounter(&app, 0, "sh");
-        assert!(results.is_empty());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "show");
     }
 
     #[test]
@@ -917,5 +971,194 @@ mod tests {
         app.input = "encounter show for".to_string();
         let results = complete_encounter(&app, 1, "for");
         assert!(results.is_empty());
+    }
+
+    // --- Subcommand completion tests (Phase 25.4) ---
+
+    #[test]
+    fn test_sound_subcommand_play_hint() {
+        let app = App::new();
+        let results = complete_sound(&app, 0, "p");
+        assert!(results.contains(&"play".to_string()));
+        assert!(results.contains(&"pause".to_string()));
+        assert!(!results.contains(&"stop".to_string()));
+    }
+
+    #[test]
+    fn test_sound_subcommand_all() {
+        let app = App::new();
+        let results = complete_sound(&app, 0, "");
+        assert_eq!(results.len(), 9);
+    }
+
+    #[test]
+    fn test_sound_subcommand_s_matches_two() {
+        let app = App::new();
+        let results = complete_sound(&app, 0, "s");
+        assert_eq!(results.len(), 3);
+        assert!(results.contains(&"search".to_string()));
+        assert!(results.contains(&"status".to_string()));
+        assert!(results.contains(&"stop".to_string()));
+    }
+
+    #[test]
+    fn test_map_subcommand_list_hint() {
+        let app = App::new();
+        let results = complete_map(&app, 0, "l");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "list");
+    }
+
+    #[test]
+    fn test_map_subcommand_all() {
+        let app = App::new();
+        let results = complete_map(&app, 0, "");
+        assert_eq!(results.len(), 7);
+    }
+
+    #[test]
+    fn test_map_subcommand_no_match() {
+        let app = App::new();
+        let results = complete_map(&app, 0, "zzz");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_encounter_subcommand_all() {
+        let app = App::new();
+        let results = complete_encounter(&app, 0, "");
+        assert_eq!(results.len(), 3);
+        assert!(results.contains(&"ls".to_string()));
+        assert!(results.contains(&"roll".to_string()));
+        assert!(results.contains(&"show".to_string()));
+    }
+
+    #[test]
+    fn test_encounter_subcommand_r() {
+        let app = App::new();
+        let results = complete_encounter(&app, 0, "r");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "roll");
+    }
+
+    #[test]
+    fn test_ls_subcommand_all() {
+        let app = App::new();
+        let results = complete_ls(&app, 0, "");
+        assert_eq!(results.len(), 5);
+        assert!(results.contains(&"players".to_string()));
+        assert!(results.contains(&"npc".to_string()));
+        assert!(results.contains(&"sound".to_string()));
+        assert!(results.contains(&"encounters".to_string()));
+        assert!(results.contains(&"commands".to_string()));
+    }
+
+    #[test]
+    fn test_ls_subcommand_p() {
+        let app = App::new();
+        let results = complete_ls(&app, 0, "p");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "players");
+    }
+
+    #[test]
+    fn test_ls_subcommand_arg1_returns_empty() {
+        let app = App::new();
+        let results = complete_ls(&app, 1, "p");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_combat_subcommand_all() {
+        let app = App::new();
+        let results = complete_combat(&app, 0, "");
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&"start".to_string()));
+        assert!(results.contains(&"end".to_string()));
+    }
+
+    #[test]
+    fn test_combat_subcommand_s() {
+        let app = App::new();
+        let results = complete_combat(&app, 0, "s");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "start");
+    }
+
+    #[test]
+    fn test_combat_subcommand_arg1_returns_empty() {
+        let app = App::new();
+        let results = complete_combat(&app, 1, "s");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_note_subcommand_all() {
+        let app = App::new();
+        let results = complete_note(&app, 0, "");
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&"list".to_string()));
+        assert!(results.contains(&"history".to_string()));
+    }
+
+    #[test]
+    fn test_note_subcommand_l() {
+        let app = App::new();
+        let results = complete_note(&app, 0, "l");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], "list");
+    }
+
+    #[test]
+    fn test_note_subcommand_arg1_returns_empty() {
+        let app = App::new();
+        let results = complete_note(&app, 1, "l");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_init_subcommand_all() {
+        let app = App::new();
+        let results = complete_init(&app, 0, "");
+        assert_eq!(results.len(), 3);
+        assert!(results.contains(&"add".to_string()));
+        assert!(results.contains(&"remove".to_string()));
+        assert!(results.contains(&"roll".to_string()));
+    }
+
+    #[test]
+    fn test_init_subcommand_r() {
+        let app = App::new();
+        let results = complete_init(&app, 0, "r");
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&"remove".to_string()));
+        assert!(results.contains(&"roll".to_string()));
+    }
+
+    #[test]
+    fn test_init_subcommand_arg1_returns_empty() {
+        let app = App::new();
+        let results = complete_init(&app, 1, "a");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_subcommand_completion_case_insensitive() {
+        let app = App::new();
+        let results = complete_sound(&app, 0, "P");
+        assert!(results.contains(&"play".to_string()));
+        assert!(results.contains(&"pause".to_string()));
+    }
+
+    #[test]
+    fn test_static_subcommand_lists_are_sorted() {
+        // Verify all constant lists are sorted for consistent completion order
+        assert!(LS_SUBCOMMANDS.windows(2).all(|w| w[0] <= w[1]));
+        assert!(SOUND_SUBCOMMANDS.windows(2).all(|w| w[0] <= w[1]));
+        assert!(MAP_SUBCOMMANDS.windows(2).all(|w| w[0] <= w[1]));
+        assert!(ENCOUNTER_SUBCOMMANDS.windows(2).all(|w| w[0] <= w[1]));
+        assert!(COMBAT_SUBCOMMANDS.windows(2).all(|w| w[0] <= w[1]));
+        assert!(NOTE_SUBCOMMANDS.windows(2).all(|w| w[0] <= w[1]));
+        assert!(INIT_SUBCOMMANDS.windows(2).all(|w| w[0] <= w[1]));
     }
 }
