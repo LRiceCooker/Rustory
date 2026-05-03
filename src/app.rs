@@ -53,16 +53,6 @@ pub enum Mode {
     Combat,
 }
 
-impl Mode {
-    pub fn prompt(&self) -> &'static str {
-        match self {
-            Mode::Default => "rustory > ",
-            Mode::Map => "rustory [map] > ",
-            Mode::Combat => "rustory [combat] > ",
-        }
-    }
-}
-
 pub struct App {
     pub running: bool,
     pub input: String,
@@ -6293,23 +6283,6 @@ mod tests {
             output.contains("dragon"),
             "Should report missing template. Got: {output}"
         );
-    }
-
-    // ---- Mode system tests ----
-
-    #[test]
-    fn test_mode_default_prompt() {
-        assert_eq!(Mode::Default.prompt(), "rustory > ");
-    }
-
-    #[test]
-    fn test_mode_map_prompt() {
-        assert_eq!(Mode::Map.prompt(), "rustory [map] > ");
-    }
-
-    #[test]
-    fn test_mode_combat_prompt() {
-        assert_eq!(Mode::Combat.prompt(), "rustory [combat] > ");
     }
 
     // ---- Smart prompt tests ----
