@@ -18,6 +18,8 @@ pdf-extract = "0.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
 rodio = "0.20"
 git2 = "0.19"
+ratatui-image = { version = "4.2", features = ["crossterm"] }
+image = "0.25"
 
 [dev-dependencies]
 tempfile = "3"

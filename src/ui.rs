@@ -16,7 +16,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.mode == Mode::Map {
         if let Some(ref world_map) = app.world_map {
             let mut buf = frame.buffer_mut().clone();
-            crate::map::renderer::render_map(world_map, &app.map_viewport, chunks[0], &mut buf);
+            crate::map::renderer::render_map(world_map, &app.map_viewport, chunks[0], &mut buf, None);
             *frame.buffer_mut() = buf;
         }
     } else if app.mode == Mode::Combat {
