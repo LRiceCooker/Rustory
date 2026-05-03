@@ -1358,7 +1358,7 @@ KTHXBYE",
             .with_sound_file("theme.flac", b"fake-audio");
 
         let mut harness = TestHarness::from_campaign(&campaign);
-        harness.execute("sound list");
+        harness.execute("ls sound");
 
         let all_output: String = harness
             .output_history()
@@ -1393,7 +1393,7 @@ KTHXBYE",
             .with_sound_file("ambiance/forest.ogg", b"fake-audio");
 
         let mut harness = TestHarness::from_campaign(&campaign);
-        harness.execute("sound list ambiance");
+        harness.execute("ls sound ambiance");
 
         let all_output: String = harness
             .output_history()
@@ -2344,7 +2344,7 @@ npcs = []
     fn test_e2e_encounter_ls_shows_zones() {
         let campaign = encounter_test_campaign();
         let mut harness = TestHarness::from_campaign(&campaign);
-        harness.execute("encounter ls");
+        harness.execute("ls encounters");
 
         let all_output: String = harness
             .output_history()
@@ -2355,11 +2355,11 @@ npcs = []
 
         assert!(
             all_output.contains("forest"),
-            "encounter ls should list the forest zone. Output: {all_output}"
+            "ls encounters should list the forest zone. Output: {all_output}"
         );
         assert!(
             all_output.contains("Dark Forest"),
-            "encounter ls should show zone name. Output: {all_output}"
+            "ls encounters should show zone name. Output: {all_output}"
         );
     }
 
@@ -2608,7 +2608,7 @@ npcs = ["nonexistent_npc"]
     #[test]
     fn test_e2e_encounter_no_campaign() {
         let mut harness = TestHarness::new();
-        harness.execute("encounter ls");
+        harness.execute("ls encounters");
 
         let all_output: String = harness
             .output_history()
@@ -2628,7 +2628,7 @@ npcs = ["nonexistent_npc"]
         let campaign = TestCampaign::new().with_system_toml("[system]\nname = \"NoEncounters\"\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
-        harness.execute("encounter ls");
+        harness.execute("ls encounters");
 
         let all_output: String = harness
             .output_history()
@@ -2657,7 +2657,7 @@ npcs = ["nonexistent_npc"]
             );
 
         let mut harness = TestHarness::from_campaign(&campaign);
-        harness.execute("encounter ls");
+        harness.execute("ls encounters");
 
         let all_output: String = harness
             .output_history()
