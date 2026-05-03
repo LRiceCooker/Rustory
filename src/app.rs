@@ -243,8 +243,12 @@ impl App {
                 ));
             }
             Mode::Combat => {
+                let combat_label = match &self.current_target {
+                    Some(target) => format!(" [combat:{target}]"),
+                    None => " [combat]".to_string(),
+                };
                 spans.push(Span::styled(
-                    " [combat]".to_string(),
+                    combat_label,
                     Style::default().fg(Color::Yellow),
                 ));
             }
@@ -3195,7 +3199,30 @@ impl App {
 
     fn handle_combat_target(&mut self, args: &str) {
         if args.is_empty() {
-            self.apply_command_result(CommandResult::Error("Usage: target <name>".to_string()));
+            // Show current target
+            match &self.current_target {
+                Some(target) => {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                        format!("Current target: {target}"),
+                        Style::default().fg(Color::Green),
+                    )]));
+                }
+                None => {
+                    self.apply_command_result(CommandResult::Output(vec![StyledLine::plain(
+                        "No target set.".to_string(),
+                    )]));
+                }
+            }
+            return;
+        }
+
+        // Clear target
+        if args.eq_ignore_ascii_case("none") {
+            self.current_target = None;
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                "Target cleared.".to_string(),
+                Style::default().fg(Color::Green),
+            )]));
             return;
         }
 
@@ -7866,6 +7893,126 @@ mod tests {
             output.contains("not found"),
             "Should show not found. Got: {output}"
         );
+    }
+
+    #[test]
+    fn test_target_no_args_shows_current() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("target_show_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("npc/goblin")).unwrap();
+        std::fs::write(
+            campaign.join("npc/goblin/sheet.csv"),
+            "name,strength\nGoblin,8\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // No target set — should say "No target set"
+        app.dispatch_command("target");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("No target set"),
+            "Should show no target. Got: {output}"
+        );
+
+        app.messages.clear();
+
+        // Set target then query
+        app.dispatch_command("target Goblin");
+        app.messages.clear();
+        app.dispatch_command("target");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Current target: Goblin"),
+            "Should show current target. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_target_none_clears() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("target_clear_test");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("npc/goblin")).unwrap();
+        std::fs::write(
+            campaign.join("npc/goblin/sheet.csv"),
+            "name,strength\nGoblin,8\n",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+        app.messages.clear();
+
+        // Set target
+        app.dispatch_command("target Goblin");
+        assert!(app.current_target.is_some());
+
+        // Clear target
+        app.messages.clear();
+        app.dispatch_command("target none");
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Target cleared"),
+            "Should confirm clear. Got: {output}"
+        );
+        assert!(app.current_target.is_none());
+    }
+
+    #[test]
+    fn test_prompt_combat_with_target() {
+        let mut app = App::new();
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("prompt_target");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        app.load_campaign(&campaign);
+        app.mode = Mode::Combat;
+        app.current_target = Some("goblin_king".to_string());
+        let text: String = app
+            .prompt_spans()
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(text, "rustory/prompt_target [combat:goblin_king] > ");
     }
 
     #[test]
