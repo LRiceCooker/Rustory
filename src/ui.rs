@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use crate::app::{App, Mode};
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(3)])
@@ -14,9 +14,15 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     // Main area: depends on mode
     if app.mode == Mode::Map {
-        if let Some(ref world_map) = app.world_map {
+        if app.world_map.is_some() {
             let mut buf = frame.buffer_mut().clone();
-            crate::map::renderer::render_map(world_map, &app.map_viewport, chunks[0], &mut buf, None);
+            crate::map::renderer::render_map(
+                app.world_map.as_ref().unwrap(),
+                &app.map_viewport,
+                chunks[0],
+                &mut buf,
+                app.map_image_protocol.as_mut(),
+            );
             *frame.buffer_mut() = buf;
         }
     } else if app.mode == Mode::Combat {

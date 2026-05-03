@@ -23,6 +23,9 @@ use crate::scripting::engine::ScriptEngine;
 use crate::scripting::loader::LolScript;
 use crate::ui;
 
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
+
 /// Find an NPC folder by name (case-insensitive) in the npc/ directory.
 pub fn find_npc_folder(npc_dir: &Path, name: &str) -> Option<PathBuf> {
     // Try exact match first
@@ -91,6 +94,9 @@ pub struct App {
     pub mode: Mode,
     pub map_viewport: MapViewport,
     pub world_map: Option<WorldMap>,
+    pub map_image: Option<image::DynamicImage>,
+    pub map_picker: Option<Picker>,
+    pub map_image_protocol: Option<StatefulProtocol>,
     pub audio_player: Option<AudioPlayer>,
     pub sound_library: SoundLibrary,
     pub persistence: Option<PersistenceLayer>,
@@ -124,6 +130,9 @@ impl App {
             mode: Mode::Default,
             map_viewport: MapViewport::default(),
             world_map: None,
+            map_image: None,
+            map_picker: None,
+            map_image_protocol: None,
             audio_player: AudioPlayer::new().ok(),
             sound_library: SoundLibrary::default(),
             persistence: None,
@@ -152,6 +161,24 @@ impl App {
         }
         self.mode = Mode::Default;
         self.map_viewport = MapViewport::default();
+
+        // Load map PNG image if present (optional)
+        let map_png = path.join("map").join("world.png");
+        if map_png.exists() {
+            if let Ok(img) = image::open(&map_png) {
+                // Create a picker if we don't already have one
+                if self.map_picker.is_none() {
+                    self.map_picker = Some(Picker::from_fontsize((8, 16)));
+                }
+                self.map_image = Some(img);
+            } else {
+                self.map_image = None;
+            }
+        } else {
+            self.map_image = None;
+        }
+        self.map_image_protocol = None;
+        self.update_map_image_for_viewport();
 
         // Load SoundLibrary from sound/ if present (optional)
         let sound_dir = path.join("sound");
@@ -234,10 +261,60 @@ impl App {
             .sum()
     }
 
+    /// Crop the source map image to match the current viewport and create a
+    /// new `StatefulProtocol` for rendering. Called when the viewport changes
+    /// (pan/zoom) or when a campaign with a PNG map is first loaded.
+    pub fn update_map_image_for_viewport(&mut self) {
+        let (img, picker, world) = match (&self.map_image, &self.map_picker, &self.world_map) {
+            (Some(img), Some(picker), Some(world)) => (img, picker, world),
+            _ => {
+                self.map_image_protocol = None;
+                return;
+            }
+        };
+
+        let map_width = world.map.info.width.max(1920.0);
+        let map_height = world.map.info.height.max(1080.0);
+
+        let view_width = map_width / self.map_viewport.zoom;
+        let view_height = map_height / self.map_viewport.zoom;
+
+        let img_w = img.width() as f64;
+        let img_h = img.height() as f64;
+
+        // Map viewport coordinates to pixel coordinates in the source image
+        let px_x = (self.map_viewport.offset_x / map_width * img_w)
+            .max(0.0)
+            .min(img_w - 1.0) as u32;
+        let px_y = (self.map_viewport.offset_y / map_height * img_h)
+            .max(0.0)
+            .min(img_h - 1.0) as u32;
+        let px_w = (view_width / map_width * img_w)
+            .max(1.0)
+            .min((img.width() - px_x) as f64) as u32;
+        let px_h = (view_height / map_height * img_h)
+            .max(1.0)
+            .min((img.height() - px_y) as f64) as u32;
+
+        let cropped = img.crop_imm(px_x, px_y, px_w, px_h);
+        self.map_image_protocol = Some(picker.new_resize_protocol(cropped));
+    }
+
     pub fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
+        // Try to detect the best image protocol for this terminal
+        if let Ok(queried) = Picker::from_query_stdio() {
+            if let Some(picker) = self.map_picker.as_mut() {
+                picker.set_protocol_type(queried.protocol_type());
+            } else {
+                self.map_picker = Some(queried);
+            }
+            // Re-create protocol with the detected protocol type
+            self.update_map_image_for_viewport();
+        }
+
         self.running = true;
         while self.running {
-            terminal.draw(|frame| ui::render(frame, &self))?;
+            terminal.draw(|frame| ui::render(frame, &mut self))?;
             self.handle_events()?;
         }
         Ok(())
@@ -253,16 +330,38 @@ impl App {
 
     pub fn on_key(&mut self, key: KeyEvent) {
         if self.mode == Mode::Map {
+            let mut viewport_changed = false;
             match (key.code, key.modifiers) {
                 (KeyCode::Esc, _) => self.mode = Mode::Default,
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => self.running = false,
-                (KeyCode::Up, _) => self.map_viewport.pan(0.0, 50.0),
-                (KeyCode::Down, _) => self.map_viewport.pan(0.0, -50.0),
-                (KeyCode::Left, _) => self.map_viewport.pan(-50.0, 0.0),
-                (KeyCode::Right, _) => self.map_viewport.pan(50.0, 0.0),
-                (KeyCode::Char('+'), _) | (KeyCode::Char('='), _) => self.map_viewport.zoom_in(),
-                (KeyCode::Char('-'), _) => self.map_viewport.zoom_out(),
+                (KeyCode::Up, _) => {
+                    self.map_viewport.pan(0.0, 50.0);
+                    viewport_changed = true;
+                }
+                (KeyCode::Down, _) => {
+                    self.map_viewport.pan(0.0, -50.0);
+                    viewport_changed = true;
+                }
+                (KeyCode::Left, _) => {
+                    self.map_viewport.pan(-50.0, 0.0);
+                    viewport_changed = true;
+                }
+                (KeyCode::Right, _) => {
+                    self.map_viewport.pan(50.0, 0.0);
+                    viewport_changed = true;
+                }
+                (KeyCode::Char('+'), _) | (KeyCode::Char('='), _) => {
+                    self.map_viewport.zoom_in();
+                    viewport_changed = true;
+                }
+                (KeyCode::Char('-'), _) => {
+                    self.map_viewport.zoom_out();
+                    viewport_changed = true;
+                }
                 _ => {}
+            }
+            if viewport_changed {
+                self.update_map_image_for_viewport();
             }
             return;
         }
@@ -4716,6 +4815,204 @@ mod tests {
     }
 
     #[test]
+    fn test_update_map_image_creates_protocol_when_all_present() {
+        use ratatui_image::picker::ProtocolType;
+        let mut app = App::new();
+        app.running = true;
+
+        let json = r##"{"info": {"width": 800, "height": 600}, "pack": {}}"##;
+        app.world_map = Some(crate::map::world::WorldMap::from_parsed(
+            crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+        ));
+        let mut picker = ratatui_image::picker::Picker::from_fontsize((8, 16));
+        picker.set_protocol_type(ProtocolType::Halfblocks);
+        app.map_picker = Some(picker);
+        app.map_image = Some(image::DynamicImage::new_rgb8(100, 80));
+
+        app.update_map_image_for_viewport();
+        assert!(
+            app.map_image_protocol.is_some(),
+            "Protocol should be created when image, picker, and world_map are present"
+        );
+    }
+
+    #[test]
+    fn test_update_map_image_none_without_image() {
+        let mut app = App::new();
+        app.running = true;
+
+        let json = r##"{"pack": {}}"##;
+        app.world_map = Some(crate::map::world::WorldMap::from_parsed(
+            crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+        ));
+        app.map_picker = Some(ratatui_image::picker::Picker::from_fontsize((8, 16)));
+        app.map_image = None;
+
+        app.update_map_image_for_viewport();
+        assert!(
+            app.map_image_protocol.is_none(),
+            "Protocol should be None when no image is loaded"
+        );
+    }
+
+    #[test]
+    fn test_viewport_pan_updates_image_protocol() {
+        use ratatui_image::picker::ProtocolType;
+        let mut app = App::new();
+        app.running = true;
+        app.mode = Mode::Map;
+
+        let json = r##"{"info": {"width": 800, "height": 600}, "pack": {}}"##;
+        app.world_map = Some(crate::map::world::WorldMap::from_parsed(
+            crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+        ));
+        let mut picker = ratatui_image::picker::Picker::from_fontsize((8, 16));
+        picker.set_protocol_type(ProtocolType::Halfblocks);
+        app.map_picker = Some(picker);
+        app.map_image = Some(image::DynamicImage::new_rgb8(100, 80));
+        app.update_map_image_for_viewport();
+
+        assert!(
+            app.map_image_protocol.is_some(),
+            "Protocol should exist before pan"
+        );
+
+        // Pan right — should recreate the protocol (viewport changed)
+        app.on_key(KeyEvent::from(KeyCode::Right));
+        assert!(
+            app.map_image_protocol.is_some(),
+            "Protocol should still exist after pan"
+        );
+        assert!(
+            app.map_viewport.offset_x > 0.0,
+            "Viewport should have panned"
+        );
+    }
+
+    #[test]
+    fn test_viewport_zoom_updates_image_protocol() {
+        use ratatui_image::picker::ProtocolType;
+        let mut app = App::new();
+        app.running = true;
+        app.mode = Mode::Map;
+
+        let json = r##"{"info": {"width": 800, "height": 600}, "pack": {}}"##;
+        app.world_map = Some(crate::map::world::WorldMap::from_parsed(
+            crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+        ));
+        let mut picker = ratatui_image::picker::Picker::from_fontsize((8, 16));
+        picker.set_protocol_type(ProtocolType::Halfblocks);
+        app.map_picker = Some(picker);
+        app.map_image = Some(image::DynamicImage::new_rgb8(100, 80));
+        app.update_map_image_for_viewport();
+
+        let initial_zoom = app.map_viewport.zoom;
+        app.on_key(KeyEvent::from(KeyCode::Char('+')));
+        assert!(app.map_viewport.zoom > initial_zoom, "Should have zoomed in");
+        assert!(
+            app.map_image_protocol.is_some(),
+            "Protocol should still exist after zoom"
+        );
+    }
+
+    #[test]
+    fn test_load_campaign_with_png_creates_image_state() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("png_campaign");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("map")).unwrap();
+        // Create a minimal world.json
+        std::fs::write(
+            campaign.join("map/world.json"),
+            r##"{"info": {"width": 800, "height": 600}, "pack": {"burgs": []}}"##,
+        )
+        .unwrap();
+        // Create a small PNG
+        let img = image::DynamicImage::new_rgb8(50, 50);
+        img.save(campaign.join("map/world.png")).unwrap();
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+
+        assert!(app.world_map.is_some(), "World map should be loaded");
+        assert!(app.map_image.is_some(), "Map image should be loaded");
+        assert!(app.map_picker.is_some(), "Picker should be created");
+        assert!(
+            app.map_image_protocol.is_some(),
+            "Protocol should be created from loaded PNG"
+        );
+    }
+
+    #[test]
+    fn test_load_campaign_without_png_no_image_state() {
+        let dir = TempDir::new().unwrap();
+        let campaign = dir.path().join("no_png_campaign");
+        std::fs::create_dir_all(campaign.join("rules")).unwrap();
+        std::fs::write(
+            campaign.join("rules/system.toml"),
+            "[system]\nname = \"Test\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(campaign.join("map")).unwrap();
+        std::fs::write(
+            campaign.join("map/world.json"),
+            r##"{"info": {"width": 800, "height": 600}, "pack": {"burgs": []}}"##,
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.load_campaign(&campaign);
+
+        assert!(app.world_map.is_some(), "World map should be loaded");
+        assert!(app.map_image.is_none(), "No image when no world.png");
+        assert!(
+            app.map_image_protocol.is_none(),
+            "No protocol when no world.png"
+        );
+    }
+
+    #[test]
+    fn test_map_mode_render_with_image_protocol() {
+        use ratatui_image::picker::ProtocolType;
+        let mut app = App::new();
+        app.running = true;
+        app.mode = Mode::Map;
+
+        let json = r##"{
+            "info": {"width": 800, "height": 600},
+            "pack": {
+                "burgs": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "TestBurg", "x": 200.0, "y": 150.0, "population": 10.0}
+                ]
+            }
+        }"##;
+        app.world_map = Some(crate::map::world::WorldMap::from_parsed(
+            crate::map::azgaar::parse_azgaar_json(json).unwrap(),
+        ));
+        let mut picker = ratatui_image::picker::Picker::from_fontsize((8, 16));
+        picker.set_protocol_type(ProtocolType::Halfblocks);
+        app.map_picker = Some(picker);
+        app.map_image = Some(image::DynamicImage::new_rgb8(100, 80));
+        app.update_map_image_for_viewport();
+
+        // Render in map mode with image protocol
+        let buf = render_app_to_buffer(&mut app, 80, 25);
+        let content = buffer_content(&buf);
+        // Should render something — the image halfblocks + canvas overlay
+        let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
+        assert!(
+            non_space > 0,
+            "Map mode with PNG should render non-empty content"
+        );
+    }
+
+    #[test]
     fn test_search_no_campaign_returns_error() {
         let mut app = App::new();
         app.running = true;
@@ -6746,7 +7043,7 @@ mod tests {
 
     // ---- Combat dashboard render tests ----
 
-    fn render_app_to_buffer(app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    fn render_app_to_buffer(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         let backend = TestBackend::new(width, height);
@@ -6769,7 +7066,7 @@ mod tests {
         app.dispatch_command("init add Thorin 18");
         app.dispatch_command("init add Goblin 12");
 
-        let buf = render_app_to_buffer(&app, 80, 25);
+        let buf = render_app_to_buffer(&mut app, 80, 25);
         let content = buffer_content(&buf);
         assert!(
             content.contains("Initiative"),
@@ -6793,7 +7090,7 @@ mod tests {
         app.dispatch_command("init add Thorin 18");
         app.dispatch_command("init add Goblin 12");
 
-        let buf = render_app_to_buffer(&app, 80, 25);
+        let buf = render_app_to_buffer(&mut app, 80, 25);
         let content = buffer_content(&buf);
         assert!(
             content.contains(">>"),
@@ -6810,7 +7107,7 @@ mod tests {
         app.dispatch_command("init add Goblin 12");
 
         // Initially Thorin is current (highest initiative)
-        let buf1 = render_app_to_buffer(&app, 80, 25);
+        let buf1 = render_app_to_buffer(&mut app, 80, 25);
         let content1 = buffer_content(&buf1);
         // >> should appear before Thorin
         let marker_pos = content1.find(">>").expect("Should have >> marker");
@@ -6822,7 +7119,7 @@ mod tests {
 
         // After next, Goblin is current
         app.dispatch_command("next");
-        let buf2 = render_app_to_buffer(&app, 80, 25);
+        let buf2 = render_app_to_buffer(&mut app, 80, 25);
         let content2 = buffer_content(&buf2);
         let marker_pos2 = content2
             .find(">>")

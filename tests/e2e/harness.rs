@@ -100,10 +100,12 @@ impl TestHarness {
     }
 
     /// Render to buffer for visual assertions
-    pub fn render(&self, width: u16, height: u16) -> Buffer {
+    pub fn render(&mut self, width: u16, height: u16) -> Buffer {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| ui::render(frame, &self.app)).unwrap();
+        terminal
+            .draw(|frame| ui::render(frame, &mut self.app))
+            .unwrap();
         terminal.backend().buffer().clone()
     }
 }
@@ -264,14 +266,14 @@ mod tests {
 
     #[test]
     fn test_harness_render() {
-        let harness = TestHarness::new();
+        let mut harness = TestHarness::new();
         let buf = harness.render(60, 20);
         assert!(buffer_contains(&buf, "rustory >"));
     }
 
     #[test]
     fn test_buffer_contains() {
-        let harness = TestHarness::new();
+        let mut harness = TestHarness::new();
         let buf = harness.render(60, 20);
         assert!(buffer_contains(&buf, "rustory >"));
         assert!(!buffer_contains(&buf, "nonexistent_text_xyz"));
@@ -279,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_buffer_line_contains() {
-        let harness = TestHarness::new();
+        let mut harness = TestHarness::new();
         let buf = harness.render(60, 20);
         // Input bar is on the last few lines (no header, so layout is main area + input bar)
         let last_line = 20 - 2; // inside the input bar
