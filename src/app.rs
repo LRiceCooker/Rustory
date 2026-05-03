@@ -2,7 +2,9 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+};
 use rand::{Rng, RngCore};
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
@@ -2143,7 +2145,8 @@ impl App {
     fn handle_give_command(&mut self, args: &str) {
         if args.is_empty() {
             self.apply_command_result(CommandResult::Error(
-                "Usage: give <item> <from> <to> (e.g. give Healing Potion thorin elara)".to_string(),
+                "Usage: give <item> <from> <to> (e.g. give Healing Potion thorin elara)"
+                    .to_string(),
             ));
             return;
         }
@@ -2157,7 +2160,8 @@ impl App {
         let words: Vec<&str> = args.split_whitespace().collect();
         if words.len() < 3 {
             self.apply_command_result(CommandResult::Error(
-                "Usage: give <item> <from> <to> (e.g. give Healing Potion thorin elara)".to_string(),
+                "Usage: give <item> <from> <to> (e.g. give Healing Potion thorin elara)"
+                    .to_string(),
             ));
             return;
         }
@@ -2351,10 +2355,7 @@ impl App {
             };
 
             // Location
-            let loc_str = ch
-                .location
-                .as_deref()
-                .unwrap_or("—");
+            let loc_str = ch.location.as_deref().unwrap_or("—");
 
             // Color based on HP percentage
             let color = if let Some(gauge) = ch.gauges.get("hp") {
@@ -2375,7 +2376,10 @@ impl App {
             };
 
             lines.push(StyledLine::new(
-                format!("{:<16} {:<14} {:<20} {}", ch.name, hp_str, cond_str, loc_str),
+                format!(
+                    "{:<16} {:<14} {:<20} {}",
+                    ch.name, hp_str, cond_str, loc_str
+                ),
                 Style::default().fg(color),
             ));
         }
@@ -2406,10 +2410,7 @@ impl App {
         )];
 
         for ch in gs.players.iter().chain(gs.npcs.iter()) {
-            let loc = ch
-                .location
-                .as_deref()
-                .unwrap_or("(no location)");
+            let loc = ch.location.as_deref().unwrap_or("(no location)");
             lines.push(StyledLine::plain(format!("  {} → {loc}", ch.name)));
         }
 
@@ -2452,8 +2453,8 @@ impl App {
             }
             return;
         }
-        if list_type.starts_with("sound ") {
-            let subfolder = list_type["sound ".len()..].trim();
+        if let Some(stripped) = list_type.strip_prefix("sound ") {
+            let subfolder = stripped.trim();
             if subfolder.is_empty() {
                 self.sound_list(None);
             } else {
@@ -2567,7 +2568,10 @@ impl App {
             ("help", "show detailed help"),
             ("history", "show recent state changes"),
             ("init", "manage initiative tracker"),
-            ("ls", "list things (players, npc, sound, encounters, commands)"),
+            (
+                "ls",
+                "list things (players, npc, sound, encounters, commands)",
+            ),
             ("load", "load a campaign folder"),
             ("map", "toggle map view / map commands"),
             ("new", "create a new campaign from template"),
@@ -2901,10 +2905,7 @@ impl App {
                                     tracker.add(name.clone(), 0.0);
                                 }
                                 lines.push(StyledLine::new(
-                                    format!(
-                                        "Added to initiative: {}",
-                                        spawned_names.join(", ")
-                                    ),
+                                    format!("Added to initiative: {}", spawned_names.join(", ")),
                                     Style::default().fg(Color::Yellow),
                                 ));
                             }
@@ -3045,10 +3046,7 @@ impl App {
                 )];
                 if !player_names.is_empty() {
                     lines.push(StyledLine::new(
-                        format!(
-                            "Added to initiative: {}",
-                            player_names.join(", ")
-                        ),
+                        format!("Added to initiative: {}", player_names.join(", ")),
                         Style::default().fg(Color::Green),
                     ));
                 }
@@ -3881,16 +3879,12 @@ impl App {
         let full_path = gs.campaign_path.join(rel_path);
 
         if !full_path.exists() {
-            self.apply_command_result(CommandResult::Error(format!(
-                "File not found: {rel_path}"
-            )));
+            self.apply_command_result(CommandResult::Error(format!("File not found: {rel_path}")));
             return;
         }
 
         if !full_path.is_file() {
-            self.apply_command_result(CommandResult::Error(format!(
-                "Not a file: {rel_path}"
-            )));
+            self.apply_command_result(CommandResult::Error(format!("Not a file: {rel_path}")));
             return;
         }
 
@@ -3903,9 +3897,7 @@ impl App {
         let content = match std::fs::read_to_string(&full_path) {
             Ok(c) => c,
             Err(e) => {
-                self.apply_command_result(CommandResult::Error(format!(
-                    "Cannot read file: {e}"
-                )));
+                self.apply_command_result(CommandResult::Error(format!("Cannot read file: {e}")));
                 return;
             }
         };
@@ -3941,20 +3933,14 @@ impl App {
                             .add_modifier(ratatui::style::Modifier::BOLD),
                     )
                 } else if line.starts_with("- ") || line.starts_with("* ") {
-                    StyledLine::new(
-                        format!("  {line}"),
-                        Style::default().fg(Color::Blue),
-                    )
+                    StyledLine::new(format!("  {line}"), Style::default().fg(Color::Blue))
                 } else if line.starts_with("> ") {
                     StyledLine::new(
                         format!("  {}", line.trim_start_matches("> ")),
                         Style::default().fg(Color::DarkGray),
                     )
                 } else if line.starts_with("```") {
-                    StyledLine::new(
-                        line.to_string(),
-                        Style::default().fg(Color::DarkGray),
-                    )
+                    StyledLine::new(line.to_string(), Style::default().fg(Color::DarkGray))
                 } else if line.trim().is_empty() {
                     StyledLine::new(String::new(), Style::default())
                 } else {
@@ -9057,10 +9043,7 @@ weight = 1
             output.contains("Thorin"),
             "Should show Thorin. Got: {output}"
         );
-        assert!(
-            output.contains("Elara"),
-            "Should show Elara. Got: {output}"
-        );
+        assert!(output.contains("Elara"), "Should show Elara. Got: {output}");
         assert!(
             output.contains("52/52"),
             "Should show Thorin HP 52/52. Got: {output}"
@@ -9088,10 +9071,12 @@ weight = 1
         // Add a condition to Thorin
         if let Some(gs) = &mut app.game_state {
             if let Some(player) = gs.players.iter_mut().find(|p| p.name == "Thorin") {
-                player.conditions.push(crate::game_state::primitives::Condition {
-                    name: "Poisoned".to_string(),
-                    active: true,
-                });
+                player
+                    .conditions
+                    .push(crate::game_state::primitives::Condition {
+                        name: "Poisoned".to_string(),
+                        active: true,
+                    });
             }
         }
         app.messages.clear();

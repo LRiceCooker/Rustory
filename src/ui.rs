@@ -77,7 +77,7 @@ fn render_unified(frame: &mut Frame, app: &mut App, area: Rect) {
             if w == 0 || width == 0 {
                 1
             } else {
-                (w + width - 1) / width
+                w.div_ceil(width)
             }
         })
         .sum();

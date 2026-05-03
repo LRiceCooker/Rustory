@@ -1,10 +1,10 @@
 use std::path::Path;
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::Color;
-use ratatui::widgets::canvas::{Canvas, Line, Points};
-use ratatui::widgets::{Block, StatefulWidget, Widget};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Style, Stylize};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, StatefulWidget, Widget, Wrap};
 
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
@@ -55,9 +55,145 @@ pub fn load_map_png(picker: &Picker, png_path: &Path) -> Option<StatefulProtocol
     Some(picker.new_resize_protocol(dyn_img))
 }
 
-/// Render the map with optional PNG background + Canvas data overlay.
-/// When `image_state` is `Some`, renders the PNG as background and composites
-/// Canvas data (burgs, routes) on top. When `None`, falls back to Canvas-only mode.
+/// Build metadata lines from the WorldMap for display alongside the image.
+fn build_metadata_lines(world: &WorldMap) -> Vec<Line<'static>> {
+    let pack = &world.map.pack;
+    let info = &world.map.info;
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Map name / title
+    let name = if info.map_name.is_empty() {
+        "World Map".to_string()
+    } else {
+        info.map_name.clone()
+    };
+    lines.push(Line::from(Span::styled(
+        name,
+        Style::default().fg(Color::Cyan).bold(),
+    )));
+    lines.push(Line::from(""));
+
+    // Counts
+    let burg_count = pack
+        .burgs
+        .iter()
+        .skip(1)
+        .filter(|b| !b.name.is_empty())
+        .count();
+    let state_count = pack
+        .states
+        .iter()
+        .skip(1)
+        .filter(|s| !s.name.is_empty())
+        .count();
+    let culture_count = pack
+        .cultures
+        .iter()
+        .skip(1)
+        .filter(|c| !c.name.is_empty())
+        .count();
+    let religion_count = pack
+        .religions
+        .iter()
+        .skip(1)
+        .filter(|r| !r.name.is_empty())
+        .count();
+    let river_count = pack.rivers.iter().filter(|r| !r.name.is_empty()).count();
+    let route_count = pack.routes.len();
+
+    lines.push(Line::from(vec![
+        Span::styled("Burgs: ", Style::default().fg(Color::Yellow)),
+        Span::raw(burg_count.to_string()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("States: ", Style::default().fg(Color::Yellow)),
+        Span::raw(state_count.to_string()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Cultures: ", Style::default().fg(Color::Yellow)),
+        Span::raw(culture_count.to_string()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Religions: ", Style::default().fg(Color::Yellow)),
+        Span::raw(religion_count.to_string()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Rivers: ", Style::default().fg(Color::Yellow)),
+        Span::raw(river_count.to_string()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Routes: ", Style::default().fg(Color::Yellow)),
+        Span::raw(route_count.to_string()),
+    ]));
+    lines.push(Line::from(""));
+
+    // States list
+    if state_count > 0 {
+        lines.push(Line::from(Span::styled(
+            "States",
+            Style::default().fg(Color::Cyan).bold(),
+        )));
+        for state in pack.states.iter().skip(1) {
+            if state.name.is_empty() {
+                continue;
+            }
+            let label = if state.form.is_empty() {
+                state.name.clone()
+            } else {
+                format!("{} ({})", state.name, state.form)
+            };
+            lines.push(Line::from(format!("  {label}")));
+        }
+        lines.push(Line::from(""));
+    }
+
+    // Capitals
+    let capitals: Vec<&crate::map::azgaar::Burg> = pack
+        .burgs
+        .iter()
+        .skip(1)
+        .filter(|b| b.capital > 0 && !b.name.is_empty())
+        .collect();
+    if !capitals.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "Capitals",
+            Style::default().fg(Color::Cyan).bold(),
+        )));
+        for burg in &capitals {
+            let pop = (burg.population * 1000.0) as u64;
+            lines.push(Line::from(format!("  {} (pop: ~{})", burg.name, pop)));
+        }
+        lines.push(Line::from(""));
+    }
+
+    // Cultures list
+    if culture_count > 0 {
+        lines.push(Line::from(Span::styled(
+            "Cultures",
+            Style::default().fg(Color::Cyan).bold(),
+        )));
+        for culture in pack.cultures.iter().skip(1) {
+            if culture.name.is_empty() {
+                continue;
+            }
+            lines.push(Line::from(format!("  {}", culture.name)));
+        }
+        lines.push(Line::from(""));
+    }
+
+    // Hint
+    lines.push(Line::from(Span::styled(
+        "Esc: exit | +/-: zoom | arrows: pan",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    lines
+}
+
+/// Render the map: PNG image + metadata sidebar.
+/// When `image_state` is `Some`, renders the PNG image.
+/// When `None`, shows metadata only with a message about the missing image.
 pub fn render_map(
     world: &WorldMap,
     viewport: &MapViewport,
@@ -65,120 +201,43 @@ pub fn render_map(
     buf: &mut Buffer,
     image_state: Option<&mut StatefulProtocol>,
 ) {
-    let map_width = world.map.info.width.max(1920.0);
-    let map_height = world.map.info.height.max(1080.0);
+    // Suppress unused variable warnings — viewport is used for image cropping in app.rs
+    let _ = viewport;
 
-    // Compute visible bounds based on viewport
-    let view_width = map_width / viewport.zoom;
-    let view_height = map_height / viewport.zoom;
-    let x_min = viewport.offset_x;
-    let x_max = viewport.offset_x + view_width;
-    // Canvas y-axis is bottom-to-top, but Azgaar is top-to-bottom.
-    // Flip: y_min at bottom, y_max at top of viewport.
-    let y_min = viewport.offset_y;
-    let y_max = viewport.offset_y + view_height;
+    let metadata_lines = build_metadata_lines(world);
 
-    let has_image = image_state.is_some();
-
-    // Step 1: render PNG background if available
     if let Some(state) = image_state {
+        // Split: image (most of the space) + metadata sidebar (right)
+        let sidebar_width = 30u16.min(area.width / 3);
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(sidebar_width)])
+            .split(area);
+
+        // Render PNG image
         let image_widget = StatefulImage::default().resize(Resize::Fit(None));
-        StatefulWidget::render(image_widget, area, buf, state);
-    }
+        StatefulWidget::render(image_widget, chunks[0], buf, state);
 
-    // Step 2: build the Canvas widget for data overlay
-    let canvas = Canvas::default()
-        .block(if has_image {
-            // No border when image is the background — maximize map area
-            Block::default()
-        } else {
-            Block::bordered().title("Map")
-        })
-        .x_bounds([x_min, x_max])
-        .y_bounds([y_min, y_max])
-        .paint(|ctx| {
-            // Draw routes as gray lines
-            for route in &world.map.pack.routes {
-                for window in route.points.windows(2) {
-                    let y1 = map_height - window[0].y;
-                    let y2 = map_height - window[1].y;
-                    ctx.draw(&Line {
-                        x1: window[0].x,
-                        y1,
-                        x2: window[1].x,
-                        y2,
-                        color: Color::DarkGray,
-                    });
-                }
-            }
-
-            // Draw rivers as blue lines (approximate as source->mouth)
-            for river in &world.map.pack.rivers {
-                if river.length > 0.0 {
-                    // Rivers don't have point data in minimal export, skip line drawing
-                    // but we could mark them with labels if needed
-                }
-            }
-
-            // Draw burgs as dots with labels
-            for burg in world.map.pack.burgs.iter().skip(1) {
-                if burg.name.is_empty() {
-                    continue;
-                }
-                let y = map_height - burg.y;
-                let color = if burg.capital > 0 {
-                    Color::Yellow
-                } else if burg.population >= 10.0 {
-                    Color::White
-                } else {
-                    Color::Gray
-                };
-
-                // Draw the burg as a point
-                ctx.draw(&Points {
-                    coords: &[(burg.x, y)],
-                    color,
-                });
-
-                // Draw the label
-                ctx.print(
-                    burg.x + 2.0,
-                    y,
-                    ratatui::text::Line::from(burg.name.clone())
-                        .style(ratatui::style::Style::default().fg(color)),
-                );
-            }
-        });
-
-    if has_image {
-        // Render Canvas to temp buffer, then composite non-empty cells onto image
-        let mut canvas_buf = Buffer::empty(area);
-        canvas.render(area, &mut canvas_buf);
-        composite_canvas_overlay(buf, &canvas_buf, area);
+        // Render metadata sidebar
+        let sidebar = Paragraph::new(metadata_lines)
+            .block(Block::default().borders(Borders::LEFT))
+            .wrap(Wrap { trim: false });
+        sidebar.render(chunks[1], buf);
     } else {
-        // No image — render Canvas directly (current behavior)
-        canvas.render(area, buf);
-    }
-}
+        // No image — show metadata only with a hint
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "No map image found (map/world.png)",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+        ];
+        lines.extend(metadata_lines);
 
-/// Composite non-empty canvas cells onto the base (image) buffer.
-/// Only copies cells that contain actual data (not blank space or empty Braille).
-fn composite_canvas_overlay(base: &mut Buffer, overlay: &Buffer, area: Rect) {
-    use ratatui::layout::Position;
-    for y in area.top()..area.bottom() {
-        for x in area.left()..area.right() {
-            let pos = Position::new(x, y);
-            if let Some(overlay_cell) = overlay.cell(pos) {
-                let sym = overlay_cell.symbol();
-                // Skip empty cells: regular space and blank Braille pattern (U+2800)
-                if sym == " " || sym == "\u{2800}" {
-                    continue;
-                }
-                if let Some(base_cell) = base.cell_mut(pos) {
-                    *base_cell = overlay_cell.clone();
-                }
-            }
-        }
+        let paragraph = Paragraph::new(lines)
+            .block(Block::bordered().title("Map"))
+            .wrap(Wrap { trim: false });
+        paragraph.render(area, buf);
     }
 }
 
@@ -190,12 +249,24 @@ mod tests {
 
     fn test_world() -> WorldMap {
         let json = r##"{
-            "info": {"width": 800, "height": 600},
+            "info": {"width": 800, "height": 600, "mapName": "Test World"},
             "pack": {
                 "burgs": [
                     {"i": 0, "name": ""},
                     {"i": 1, "name": "Silverport", "x": 200.0, "y": 150.0, "population": 28.5, "capital": 1},
                     {"i": 2, "name": "Ironhold", "x": 500.0, "y": 300.0, "population": 12.0}
+                ],
+                "states": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Kingdom of Light", "formName": "Kingdom"}
+                ],
+                "cultures": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Elven"}
+                ],
+                "religions": [
+                    {"i": 0, "name": ""},
+                    {"i": 1, "name": "Order of Light", "type": "Organized"}
                 ],
                 "routes": [
                     {"i": 1, "points": [{"x": 200.0, "y": 150.0}, {"x": 350.0, "y": 225.0}, {"x": 500.0, "y": 300.0}], "group": "roads", "length": 100.0}
@@ -218,8 +289,15 @@ mod tests {
         image::DynamicImage::new_rgb8(100, 80)
     }
 
+    fn buffer_content(buf: &Buffer) -> String {
+        buf.content()
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect()
+    }
+
     #[test]
-    fn test_render_produces_non_empty_output() {
+    fn test_render_without_png_shows_metadata() {
         let world = test_world();
         let viewport = MapViewport::default();
         let area = Rect::new(0, 0, 60, 20);
@@ -227,130 +305,30 @@ mod tests {
 
         render_map(&world, &viewport, area, &mut buf, None);
 
-        // Buffer should not be all spaces — something was rendered
-        let content: String = buf
-            .content()
-            .iter()
-            .map(|c| c.symbol().to_string())
-            .collect();
-        let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
+        let content = buffer_content(&buf);
+        assert!(content.contains("Burgs"), "Should show burg count");
+        assert!(content.contains("States"), "Should show state count");
         assert!(
-            non_space > 0,
-            "Rendered map should have non-whitespace content"
+            content.contains("No map image"),
+            "Should indicate missing PNG"
         );
     }
 
     #[test]
-    fn test_render_at_different_zoom_levels() {
-        let world = test_world();
-        let area = Rect::new(0, 0, 60, 20);
-
-        for zoom in [0.5, 1.0, 2.0, 5.0] {
-            let viewport = MapViewport {
-                offset_x: 0.0,
-                offset_y: 0.0,
-                zoom,
-            };
-            let mut buf = Buffer::empty(area);
-            render_map(&world, &viewport, area, &mut buf, None);
-
-            let content: String = buf
-                .content()
-                .iter()
-                .map(|c| c.symbol().to_string())
-                .collect();
-            let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
-            assert!(
-                non_space > 0,
-                "Rendered map at zoom {zoom} should have content"
-            );
-        }
-    }
-
-    #[test]
-    fn test_render_without_png_canvas_only() {
-        // This is the fallback mode — no PNG, just Canvas data
+    fn test_render_without_png_shows_map_name() {
         let world = test_world();
         let viewport = MapViewport::default();
-        let area = Rect::new(0, 0, 80, 25);
+        let area = Rect::new(0, 0, 60, 20);
         let mut buf = Buffer::empty(area);
 
         render_map(&world, &viewport, area, &mut buf, None);
 
-        let content: String = buf
-            .content()
-            .iter()
-            .map(|c| c.symbol().to_string())
-            .collect();
-        // Should render burg names
-        assert!(
-            content.contains("Silverport") || content.contains("Ironhold"),
-            "Canvas-only mode should render burg labels. Content: {content:?}"
-        );
+        let content = buffer_content(&buf);
+        assert!(content.contains("Test World"), "Should show map name");
     }
 
     #[test]
-    fn test_render_with_png_background() {
-        let world = test_world();
-        let viewport = MapViewport::default();
-        let area = Rect::new(0, 0, 60, 20);
-        let picker = test_picker();
-        let dyn_img = test_png();
-        let mut state = picker.new_resize_protocol(dyn_img);
-
-        let mut buf = Buffer::empty(area);
-        render_map(&world, &viewport, area, &mut buf, Some(&mut state));
-
-        // Buffer should have content (image + canvas data)
-        let content: String = buf
-            .content()
-            .iter()
-            .map(|c| c.symbol().to_string())
-            .collect();
-        let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
-        assert!(
-            non_space > 0,
-            "Map with PNG background should have non-whitespace content"
-        );
-    }
-
-    #[test]
-    fn test_render_with_png_has_no_border() {
-        // When PNG is present, Canvas should NOT have a bordered block
-        let world = test_world();
-        let viewport = MapViewport::default();
-        let area = Rect::new(0, 0, 60, 20);
-        let picker = test_picker();
-        let dyn_img = test_png();
-        let mut state = picker.new_resize_protocol(dyn_img);
-
-        let mut buf_with_image = Buffer::empty(area);
-        render_map(
-            &world,
-            &viewport,
-            area,
-            &mut buf_with_image,
-            Some(&mut state),
-        );
-
-        let mut buf_canvas_only = Buffer::empty(area);
-        render_map(&world, &viewport, area, &mut buf_canvas_only, None);
-
-        // Canvas-only mode should have border characters (─, │, etc.)
-        let canvas_content: String = buf_canvas_only
-            .content()
-            .iter()
-            .map(|c| c.symbol().to_string())
-            .collect();
-        assert!(
-            canvas_content.contains('─') || canvas_content.contains('│'),
-            "Canvas-only should have border chars"
-        );
-    }
-
-    #[test]
-    fn test_render_with_png_preserves_burg_labels() {
-        // Canvas overlay on PNG should still show burg names
+    fn test_render_with_png_shows_image_and_sidebar() {
         let world = test_world();
         let viewport = MapViewport::default();
         let area = Rect::new(0, 0, 80, 25);
@@ -361,14 +339,49 @@ mod tests {
         let mut buf = Buffer::empty(area);
         render_map(&world, &viewport, area, &mut buf, Some(&mut state));
 
-        let content: String = buf
-            .content()
-            .iter()
-            .map(|c| c.symbol().to_string())
-            .collect();
+        let content = buffer_content(&buf);
+        // Sidebar should have metadata
+        assert!(content.contains("Burgs"), "Sidebar should show metadata");
+        // Buffer should have non-whitespace content (image + sidebar)
+        let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
+        assert!(non_space > 0, "Should have content");
+    }
+
+    #[test]
+    fn test_render_with_png_sidebar_shows_states() {
+        let world = test_world();
+        let viewport = MapViewport::default();
+        let area = Rect::new(0, 0, 80, 25);
+        let picker = test_picker();
+        let dyn_img = test_png();
+        let mut state = picker.new_resize_protocol(dyn_img);
+
+        let mut buf = Buffer::empty(area);
+        render_map(&world, &viewport, area, &mut buf, Some(&mut state));
+
+        let content = buffer_content(&buf);
         assert!(
-            content.contains("Silverport") || content.contains("Ironhold"),
-            "PNG mode should still render burg labels via Canvas overlay. Content: {content:?}"
+            content.contains("Kingdom of Light"),
+            "Sidebar should list states"
+        );
+    }
+
+    #[test]
+    fn test_render_with_png_sidebar_shows_capitals() {
+        let world = test_world();
+        let viewport = MapViewport::default();
+        let area = Rect::new(0, 0, 80, 30);
+        let picker = test_picker();
+        let dyn_img = test_png();
+        let mut state = picker.new_resize_protocol(dyn_img);
+
+        let mut buf = Buffer::empty(area);
+        render_map(&world, &viewport, area, &mut buf, Some(&mut state));
+
+        let content = buffer_content(&buf);
+        assert!(
+            content.contains("Silverport"),
+            "Sidebar should show capital"
         );
     }
 
@@ -381,7 +394,6 @@ mod tests {
 
     #[test]
     fn test_load_map_png_with_valid_image() {
-        // Create a temp PNG file
         let dir = tempfile::TempDir::new().unwrap();
         let png_path = dir.path().join("test.png");
         let img = image::DynamicImage::new_rgb8(50, 50);
@@ -390,62 +402,6 @@ mod tests {
         let picker = test_picker();
         let result = load_map_png(&picker, &png_path);
         assert!(result.is_some(), "Valid PNG should return Some");
-    }
-
-    #[test]
-    fn test_composite_canvas_overlay_preserves_base() {
-        use ratatui::layout::Position;
-        let area = Rect::new(0, 0, 10, 5);
-        let mut base = Buffer::empty(area);
-        // Fill base with 'X' to simulate image data
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                base.cell_mut(Position::new(x, y)).unwrap().set_symbol("X");
-            }
-        }
-
-        // Overlay is all spaces (empty canvas)
-        let overlay = Buffer::empty(area);
-
-        composite_canvas_overlay(&mut base, &overlay, area);
-
-        // Base should still be all 'X' — empty overlay doesn't overwrite
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                assert_eq!(
-                    base.cell(Position::new(x, y)).unwrap().symbol(),
-                    "X",
-                    "Empty overlay should not overwrite base at ({x}, {y})"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_composite_canvas_overlay_writes_data() {
-        use ratatui::layout::Position;
-        let area = Rect::new(0, 0, 10, 5);
-        let mut base = Buffer::empty(area);
-        // Fill base with 'X'
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                base.cell_mut(Position::new(x, y)).unwrap().set_symbol("X");
-            }
-        }
-
-        // Overlay has one non-space cell
-        let mut overlay = Buffer::empty(area);
-        overlay
-            .cell_mut(Position::new(3, 2))
-            .unwrap()
-            .set_symbol("A");
-
-        composite_canvas_overlay(&mut base, &overlay, area);
-
-        // Cell (3,2) should be 'A', rest should be 'X'
-        assert_eq!(base.cell(Position::new(3, 2)).unwrap().symbol(), "A");
-        assert_eq!(base.cell(Position::new(0, 0)).unwrap().symbol(), "X");
-        assert_eq!(base.cell(Position::new(9, 4)).unwrap().symbol(), "X");
     }
 
     #[test]
@@ -491,5 +447,40 @@ mod tests {
         };
         vp2.zoom_out();
         assert!(vp2.zoom >= 0.1, "Zoom should be clamped to min 0.1");
+    }
+
+    #[test]
+    fn test_build_metadata_lines_counts() {
+        let world = test_world();
+        let lines = build_metadata_lines(&world);
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect();
+        assert!(text.contains('2'), "Should show burg count of 2");
+        assert!(text.contains('1'), "Should show state count of 1");
+    }
+
+    #[test]
+    fn test_render_at_different_zoom_levels() {
+        let world = test_world();
+        let area = Rect::new(0, 0, 60, 20);
+
+        for zoom in [0.5, 1.0, 2.0, 5.0] {
+            let viewport = MapViewport {
+                offset_x: 0.0,
+                offset_y: 0.0,
+                zoom,
+            };
+            let mut buf = Buffer::empty(area);
+            render_map(&world, &viewport, area, &mut buf, None);
+
+            let content = buffer_content(&buf);
+            let non_space = content.chars().filter(|c| !c.is_whitespace()).count();
+            assert!(
+                non_space > 0,
+                "Rendered map at zoom {zoom} should have content"
+            );
+        }
     }
 }
