@@ -503,6 +503,10 @@ impl App {
             self.handle_who_command();
             return;
         }
+        if command == mapping::WHERE {
+            self.handle_where_command();
+            return;
+        }
         if command == mapping::ENCOUNTER {
             self.handle_encounter_command(args);
             return;
@@ -680,6 +684,7 @@ impl App {
                 "  encounter — encounter tables (e.g. encounter ls, encounter roll forest)",
             ),
             StyledLine::plain("  who      — player dashboard (HP, conditions, location)"),
+            StyledLine::plain("  where    — show all character map locations"),
             StyledLine::plain("  validate — check campaign files against schemas"),
             StyledLine::plain("  quit     — exit Rustory"),
         ];
@@ -2332,6 +2337,39 @@ impl App {
                 format!("{:<16} {:<14} {:<20} {}", ch.name, hp_str, cond_str, loc_str),
                 Style::default().fg(color),
             ));
+        }
+
+        self.apply_command_result(CommandResult::Output(lines));
+    }
+
+    fn handle_where_command(&mut self) {
+        let gs = match &self.game_state {
+            Some(gs) => gs,
+            None => {
+                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
+                return;
+            }
+        };
+
+        if gs.players.is_empty() && gs.npcs.is_empty() {
+            self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
+                "No characters loaded.".to_string(),
+                Style::default().fg(Color::Yellow),
+            )]));
+            return;
+        }
+
+        let mut lines = vec![StyledLine::new(
+            "Character locations:".to_string(),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        for ch in gs.players.iter().chain(gs.npcs.iter()) {
+            let loc = ch
+                .location
+                .as_deref()
+                .unwrap_or("(no location)");
+            lines.push(StyledLine::plain(format!("  {} → {loc}", ch.name)));
         }
 
         self.apply_command_result(CommandResult::Output(lines));
@@ -8357,6 +8395,83 @@ mod tests {
         assert!(
             output.contains("\u{2014}"),
             "Should show em-dash for missing location. Got: {output}"
+        );
+    }
+
+    // --- Where command tests ---
+
+    #[test]
+    fn test_where_shows_locations() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_who_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // Set locations
+        if let Some(gs) = &mut app.game_state {
+            if let Some(player) = gs.players.iter_mut().find(|p| p.name == "Thorin") {
+                player.location = Some("Thornwall".to_string());
+            }
+            if let Some(player) = gs.players.iter_mut().find(|p| p.name == "Elara") {
+                player.location = Some("Harborreach".to_string());
+            }
+        }
+        app.messages.clear();
+
+        app.dispatch_command("where");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Thorin") && output.contains("Thornwall"),
+            "Should show Thorin → Thornwall. Got: {output}"
+        );
+        assert!(
+            output.contains("Elara") && output.contains("Harborreach"),
+            "Should show Elara → Harborreach. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_where_handles_no_location() {
+        let dir = TempDir::new().unwrap();
+        let campaign = setup_who_campaign(dir.path());
+
+        let mut app = App::new();
+        app.running = true;
+        app.load_campaign(&campaign);
+
+        // Set location only for Thorin, not Elara
+        if let Some(gs) = &mut app.game_state {
+            if let Some(player) = gs.players.iter_mut().find(|p| p.name == "Thorin") {
+                player.location = Some("Thornwall".to_string());
+            }
+        }
+        app.messages.clear();
+
+        app.dispatch_command("where");
+
+        let output: String = app
+            .messages
+            .iter()
+            .map(|m| &m.text)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            output.contains("Thornwall"),
+            "Should show Thorin's location. Got: {output}"
+        );
+        assert!(
+            output.contains("(no location)"),
+            "Should show (no location) for Elara. Got: {output}"
         );
     }
 

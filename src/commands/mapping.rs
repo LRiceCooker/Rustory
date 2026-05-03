@@ -29,10 +29,11 @@ pub const SOUND: &str = "sound";
 pub const SPAWN: &str = "spawn";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
+pub const WHERE: &str = "where";
 pub const WHO: &str = "who";
 
-pub const COMMANDS: [&str; 31] = [
+pub const COMMANDS: [&str; 32] = [
     CAT, COMBAT, DAMAGE, DAMAGE_ALIAS, ENCOUNTER, GIVE, HEAL, HEAL_ALIAS, HELP, HISTORY, INIT,
     LIST, LOAD, MAP, NEW, NEXT, NOTE, PREV, QUIT, REDO, ROLL, SEARCH, SET, SHOW, SOUND, SPAWN,
-    STATUS, TARGET, UNDO, VALIDATE, WHO,
+    STATUS, TARGET, UNDO, VALIDATE, WHERE, WHO,
 ];
