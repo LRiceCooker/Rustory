@@ -414,14 +414,17 @@ impl App {
         self.last_command = Some(input.to_string());
         self.scroll_offset = 0;
 
-        // Echo the command in DarkGray
+        // Echo the original command in DarkGray (before alias resolution)
         self.messages.push(Message {
             text: format!("> {input}"),
             style: Style::default().fg(Color::DarkGray),
         });
 
+        // Resolve short aliases before dispatching (e.g. "r 2d6" → "roll 2d6")
+        let resolved = mapping::resolve_alias(input);
+
         // Parse command and args for app-level commands
-        let parts: Vec<&str> = input.splitn(2, ' ').collect();
+        let parts: Vec<&str> = resolved.splitn(2, ' ').collect();
         let command = parts[0];
         let args = parts.get(1).unwrap_or(&"").trim();
 
@@ -460,7 +463,7 @@ impl App {
             self.handle_set_command(args);
             return;
         }
-        if command == mapping::LIST || command == mapping::LIST_ALIAS {
+        if command == mapping::LIST {
             self.handle_list_command(args);
             return;
         }
@@ -488,14 +491,6 @@ impl App {
             self.handle_sound_command(args);
             return;
         }
-        if command == mapping::SOUND_PLAY_ALIAS {
-            self.sound_play(args);
-            return;
-        }
-        if command == mapping::MAP_MOVE_ALIAS {
-            self.map_move(args);
-            return;
-        }
         if command == mapping::VALIDATE {
             self.handle_validate_command(args);
             return;
@@ -504,11 +499,11 @@ impl App {
             self.handle_spawn_command(args);
             return;
         }
-        if command == mapping::DAMAGE || command == mapping::DAMAGE_ALIAS {
+        if command == mapping::DAMAGE {
             self.handle_damage_command(args);
             return;
         }
-        if command == mapping::HEAL || command == mapping::HEAL_ALIAS {
+        if command == mapping::HEAL {
             self.handle_heal_command(args);
             return;
         }
@@ -547,7 +542,7 @@ impl App {
         }
         // Hybrid dispatch: built-in first, then custom commands, then unknown
         let custom_commands = self.game_state.as_ref().map(|gs| &gs.custom_commands);
-        let result = dispatcher::dispatch(input, &mut self.rng, custom_commands);
+        let result = dispatcher::dispatch(&resolved, &mut self.rng, custom_commands);
 
         if let CommandResult::Custom(ref script) = result {
             let script = script.clone();
@@ -4100,8 +4095,8 @@ impl App {
         }
         let input_lower = self.input.to_lowercase();
 
-        // Try built-in commands first
-        let builtin_match = crate::commands::mapping::COMMANDS
+        // Try built-in commands + aliases
+        let builtin_match = crate::commands::mapping::ALL_COMPLETABLE
             .iter()
             .find(|cmd| cmd.starts_with(&input_lower) && **cmd != input_lower)
             .map(|cmd| cmd[self.input.len()..].to_string());

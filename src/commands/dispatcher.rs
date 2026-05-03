@@ -151,17 +151,17 @@ pub fn dispatch(
         mapping::SEARCH => {
             CommandResult::Error("search command must be handled by the app".to_string())
         }
-        mapping::MAP | mapping::MAP_MOVE_ALIAS => {
+        mapping::MAP => {
             CommandResult::Error("map command must be handled by the app".to_string())
         }
-        mapping::SOUND | mapping::SOUND_PLAY_ALIAS => {
+        mapping::SOUND => {
             CommandResult::Error("sound command must be handled by the app".to_string())
         }
         mapping::SHOW => {
             CommandResult::Error("show command must be handled by the app".to_string())
         }
         mapping::SET => CommandResult::Error("set command must be handled by the app".to_string()),
-        mapping::LIST | mapping::LIST_ALIAS => {
+        mapping::LIST => {
             CommandResult::Error("ls command must be handled by the app".to_string())
         }
         mapping::HISTORY => {
@@ -179,7 +179,7 @@ pub fn dispatch(
         mapping::GIVE => {
             CommandResult::Error("give command must be handled by the app".to_string())
         }
-        mapping::DAMAGE | mapping::DAMAGE_ALIAS => {
+        mapping::DAMAGE => {
             CommandResult::Error("damage command must be handled by the app".to_string())
         }
         mapping::COMBAT
