@@ -202,22 +202,6 @@ impl TestCampaign {
         self
     }
 
-    /// Add a bestiary creature CSV to bestiary/<name>.csv
-    pub fn with_bestiary_creature(self, name: &str, csv: &str) -> Self {
-        let bestiary_dir = self.dir.path().join("bestiary");
-        fs::create_dir_all(&bestiary_dir).unwrap();
-        fs::write(bestiary_dir.join(format!("{name}.csv")), csv).unwrap();
-        self
-    }
-
-    /// Add an encounter TOML to bestiary/encounters/<name>.toml
-    pub fn with_encounter(self, name: &str, toml: &str) -> Self {
-        let enc_dir = self.dir.path().join("bestiary/encounters");
-        fs::create_dir_all(&enc_dir).unwrap();
-        fs::write(enc_dir.join(format!("{name}.toml")), toml).unwrap();
-        self
-    }
-
     pub fn with_map(self, json: &str) -> Self {
         let map_dir = self.dir.path().join("map");
         fs::create_dir_all(&map_dir).unwrap();
@@ -1687,63 +1671,24 @@ KTHXBYE",
         );
     }
 
-    // ---- Phase 19 E2E: Bestiary & encounter system ----
+    // ---- Phase 19 E2E: Spawn from NPC folders ----
 
-    fn bestiary_system_toml() -> &'static str {
-        "[system]\nname = \"BestiaryTest\"\n\n\
+    fn spawn_system_toml() -> &'static str {
+        "[system]\nname = \"SpawnTest\"\n\n\
          [character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n\n\
          [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n"
     }
 
-    fn bestiary_test_campaign() -> TestCampaign {
+    fn spawn_test_campaign() -> TestCampaign {
         TestCampaign::new()
-            .with_system_toml(bestiary_system_toml())
-            .with_bestiary_creature("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
-            .with_bestiary_creature("orc", "name,strength,hp_max,ac\nOrc,16,15,13\n")
-            .with_encounter(
-                "goblin_patrol",
-                "[encounter]\nname = \"Goblin Patrol\"\n\
-                 description = \"A small group of goblins on the road\"\n\n\
-                 [[creatures]]\ntemplate = \"goblin\"\ncount = 3\n\n\
-                 [[creatures]]\ntemplate = \"orc\"\ncount = 1\n\
-                 name_override = \"Orc Chieftain\"\n",
-            )
+            .with_system_toml(spawn_system_toml())
+            .with_npc("goblin", "name,strength,hp_max,ac\nGoblin,8,7,15\n")
+            .with_npc("orc", "name,strength,hp_max,ac\nOrc,16,15,13\n")
     }
 
     #[test]
-    fn test_e2e_bestiary_list_shows_creatures() {
-        let campaign = bestiary_test_campaign();
-        let mut harness = TestHarness::from_campaign(&campaign);
-        harness.execute("bestiary list");
-
-        let all_output: String = harness
-            .output_history()
-            .iter()
-            .map(|m| m.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(
-            all_output.contains("Goblin"),
-            "Should list Goblin. Output: {all_output}"
-        );
-        assert!(
-            all_output.contains("Orc"),
-            "Should list Orc. Output: {all_output}"
-        );
-        assert!(
-            all_output.contains("HP: 7"),
-            "Should show Goblin HP. Output: {all_output}"
-        );
-        assert!(
-            all_output.contains("AC: 15"),
-            "Should show Goblin AC. Output: {all_output}"
-        );
-    }
-
-    #[test]
-    fn test_e2e_spawn_creates_npc() {
-        let campaign = bestiary_test_campaign();
+    fn test_e2e_spawn_creates_npc_from_folder() {
+        let campaign = spawn_test_campaign();
         let mut harness = TestHarness::from_campaign(&campaign);
         harness.execute("spawn goblin");
 
@@ -1774,7 +1719,7 @@ KTHXBYE",
 
     #[test]
     fn test_e2e_show_spawned_npc() {
-        let campaign = bestiary_test_campaign();
+        let campaign = spawn_test_campaign();
         let mut harness = TestHarness::from_campaign(&campaign);
 
         // Spawn with a custom name (no spaces) so show can find it
@@ -1810,64 +1755,13 @@ KTHXBYE",
     }
 
     #[test]
-    fn test_e2e_encounter_spawns_group() {
-        let campaign = bestiary_test_campaign();
-        let mut harness = TestHarness::from_campaign(&campaign);
-        harness.execute("encounter goblin patrol");
-
-        // Verify output
-        let all_output: String = harness
-            .output_history()
-            .iter()
-            .map(|m| m.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            all_output.contains("Goblin Patrol"),
-            "Should mention encounter name. Output: {all_output}"
-        );
-        assert!(
-            all_output.contains("4"),
-            "Should mention 4 creatures spawned. Output: {all_output}"
-        );
-
-        // Verify all 4 NPCs created in game state
-        let gs = harness.game_state().expect("game state should exist");
-        assert_eq!(
-            gs.npcs.len(),
-            4,
-            "Should have 4 NPCs. Got: {:?}",
-            gs.npcs.iter().map(|n| &n.name).collect::<Vec<_>>()
-        );
-
-        assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
-        assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
-        assert!(gs.get_npc("Goblin #3").is_some(), "Goblin #3 should exist");
-        assert!(
-            gs.get_npc("Orc Chieftain").is_some(),
-            "Orc Chieftain should exist"
-        );
-
-        // Verify stats are correct
-        let goblin = gs.get_npc("Goblin #1").unwrap();
-        assert_eq!(goblin.get_stat("strength"), Some(8.0));
-        assert!(goblin.gauges.contains_key("hp"));
-        assert_eq!(goblin.gauges["hp"].max, 7.0);
-
-        let orc = gs.get_npc("Orc Chieftain").unwrap();
-        assert_eq!(orc.get_stat("strength"), Some(16.0));
-        assert!(orc.gauges.contains_key("hp"));
-        assert_eq!(orc.gauges["hp"].max, 15.0);
-    }
-
-    #[test]
     fn test_e2e_ls_npc_shows_spawned_creatures() {
-        let campaign = bestiary_test_campaign();
+        let campaign = spawn_test_campaign();
         let mut harness = TestHarness::from_campaign(&campaign);
 
-        // Spawn a single goblin, then an encounter group
+        // Spawn multiple goblins
         harness.execute("spawn goblin");
-        harness.execute("encounter goblin patrol");
+        harness.execute("spawn goblin");
 
         harness.execute("ls npc");
 
@@ -1878,7 +1772,6 @@ KTHXBYE",
             .collect::<Vec<_>>()
             .join("\n");
 
-        // The single spawn created "Goblin #1", encounter created "Goblin #2", "#3", "#4", "Orc Chieftain"
         assert!(
             all_output.contains("Goblin #1"),
             "Should list Goblin #1. Output: {all_output}"
@@ -1886,10 +1779,6 @@ KTHXBYE",
         assert!(
             all_output.contains("Goblin #2"),
             "Should list Goblin #2. Output: {all_output}"
-        );
-        assert!(
-            all_output.contains("Orc Chieftain"),
-            "Should list Orc Chieftain. Output: {all_output}"
         );
     }
 
@@ -2056,18 +1945,14 @@ success = \"result >= dc\"
             .with_player("thorin", "name,class,strength,hp_max,ac\nThorin,Fighter,18,52,18\n")
             .with_npc("goblin", "name,class,strength,hp_max,ac\nGoblin,Monster,8,7,15\n")
             .with_lore("goblin", "# Goblin\nA sneaky green creature that lurks in caves.\n")
-            .with_bestiary_creature("orc", "name,class,strength,hp_max,ac\nOrc,Monster,16,15,13\n")
-            .with_encounter(
-                "orc_ambush",
-                "[encounter]\nname = \"Orc Ambush\"\ndescription = \"Orcs!\"\n\n[[creatures]]\ntemplate = \"orc\"\ncount = 2\n",
-            );
+            .with_npc("orc", "name,class,strength,hp_max,ac\nOrc,Monster,16,15,13\n");
 
         let mut harness = TestHarness::from_campaign(&campaign);
 
         // 1. Verify characters loaded
         let gs = harness.game_state().unwrap();
         assert_eq!(gs.players.len(), 1);
-        assert_eq!(gs.npcs.len(), 1);
+        assert_eq!(gs.npcs.len(), 2); // goblin + orc (NPC folders)
         let thorin = gs.get_player("Thorin").unwrap();
         assert_eq!(thorin.get_stat("strength"), Some(18.0));
 
@@ -2122,27 +2007,19 @@ success = \"result >= dc\"
             "search should find lore content"
         );
 
-        // 7. Spawn from bestiary
-        harness.execute("spawn orc");
+        // 7. Spawn from NPC folder
+        harness.execute("spawn orc Guard");
         let gs = harness.game_state().unwrap();
-        assert!(gs.get_npc("Orc #1").is_some(), "spawn should create Orc #1");
+        assert!(gs.get_npc("Guard").is_some(), "spawn should create Guard");
 
-        // 8. Encounter
-        harness.execute("encounter orc ambush");
-        let gs = harness.game_state().unwrap();
-        assert!(
-            gs.get_npc("Orc #2").is_some(),
-            "encounter should create Orc #2"
-        );
-
-        // 9. Combat mode
+        // 8. Combat mode
         harness.execute("combat start");
         assert_eq!(harness.app.mode, rustory::app::Mode::Combat);
 
         harness.execute("init add Thorin 18");
         harness.execute("init add Goblin 12");
 
-        // 10. Status shows combatants
+        // 9. Status shows combatants
         harness.execute("status");
         let out: String = harness
             .output_history()
@@ -2155,14 +2032,14 @@ success = \"result >= dc\"
             "status should show combatants"
         );
 
-        // 11. Next advances turn
+        // 10. Next advances turn
         harness.execute("next");
 
-        // 12. Combat end
+        // 11. Combat end
         harness.execute("combat end");
         assert_eq!(harness.app.mode, rustory::app::Mode::Default);
 
-        // 13. Add note
+        // 12. Add note
         harness.execute("note The smoke test passed");
         harness.execute("note list");
         let out: String = harness
@@ -2176,7 +2053,7 @@ success = \"result >= dc\"
             "note list should show note"
         );
 
-        // 14. List players/npcs
+        // 13. List players/npcs
         harness.execute("ls players");
         let out: String = harness
             .output_history()
@@ -2195,7 +2072,7 @@ success = \"result >= dc\"
             .join("\n");
         assert!(out.contains("Goblin"), "ls should show Goblin");
 
-        // 15. TUI renders correctly (no header bar, just main area + input)
+        // 14. TUI renders correctly (no header bar, just main area + input)
         let buf = harness.render(80, 25);
         assert!(
             buffer_contains(&buf, "rustory/"),

@@ -5,7 +5,6 @@ pub mod primitives;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::bestiary::{self, BestiaryEntry, Encounter};
 use crate::rules::{self, CampaignRules, CampaignSchema};
 use crate::scripting::loader::LolScript;
 use crate::search::pdf_index::SearchIndex;
@@ -21,8 +20,6 @@ pub struct GameState {
     pub schema: Option<CampaignSchema>,
     pub custom_commands: HashMap<String, LolScript>,
     pub search_index: SearchIndex,
-    pub bestiary_entries: Vec<BestiaryEntry>,
-    pub bestiary_encounters: Vec<Encounter>,
 }
 
 impl GameState {
@@ -41,8 +38,6 @@ impl GameState {
             schema: None,
             custom_commands: HashMap::new(),
             search_index: SearchIndex::new(),
-            bestiary_entries: Vec::new(),
-            bestiary_encounters: Vec::new(),
         }
     }
 
@@ -101,13 +96,6 @@ impl GameState {
         for npc in npc_result.characters {
             gs.add_npc(npc);
         }
-
-        // Load bestiary entries and encounters
-        let bestiary_dir = path.join("bestiary");
-        let bestiary_result = bestiary::load_bestiary(&bestiary_dir, &expected_refs);
-        all_errors.extend(bestiary_result.errors);
-        gs.bestiary_entries = bestiary_result.entries;
-        gs.bestiary_encounters = bestiary_result.encounters;
 
         // Apply resource_defs: create gauges and pools on loaded characters
         if let Some(rules) = &gs.rules {

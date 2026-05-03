@@ -23,6 +23,30 @@ use crate::scripting::engine::ScriptEngine;
 use crate::scripting::loader::LolScript;
 use crate::ui;
 
+/// Find an NPC folder by name (case-insensitive) in the npc/ directory.
+pub fn find_npc_folder(npc_dir: &Path, name: &str) -> Option<PathBuf> {
+    // Try exact match first
+    let exact = npc_dir.join(name);
+    if exact.is_dir() && exact.join("sheet.csv").exists() {
+        return Some(exact);
+    }
+    // Try case-insensitive match
+    let lower = name.to_lowercase();
+    if let Ok(entries) = std::fs::read_dir(npc_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                    if dir_name.to_lowercase() == lower && path.join("sheet.csv").exists() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Recursively copy a directory and all its contents.
 fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dest)?;
@@ -351,10 +375,6 @@ impl App {
             self.handle_validate_command(args);
             return;
         }
-        if command == mapping::BESTIARY {
-            self.handle_bestiary_command(args);
-            return;
-        }
         if command == mapping::SPAWN {
             self.handle_spawn_command(args);
             return;
@@ -528,10 +548,11 @@ impl App {
             StyledLine::plain("  undo     — revert the last state change"),
             StyledLine::plain("  redo     — re-apply the last undone change"),
             StyledLine::plain("  sound    — play audio (e.g. sound play ambiance/tavern.mp3)"),
-            StyledLine::plain("  bestiary — list creature templates (e.g. bestiary info goblin)"),
-            StyledLine::plain("  spawn     — create NPC from bestiary (e.g. spawn goblin)"),
             StyledLine::plain(
-                "  encounter — spawn an encounter group (e.g. encounter goblin patrol)",
+                "  spawn     — duplicate NPC folder as new NPC (e.g. spawn goblin_king Guard)",
+            ),
+            StyledLine::plain(
+                "  encounter — encounter tables (e.g. encounter ls, encounter roll forest)",
             ),
             StyledLine::plain("  validate — check campaign files against schemas"),
             StyledLine::plain("  quit     — exit Rustory"),
@@ -1825,100 +1846,17 @@ impl App {
         }
     }
 
-    fn handle_bestiary_command(&mut self, args: &str) {
-        let gs = match &self.game_state {
-            Some(gs) => gs,
-            None => {
-                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
-                return;
-            }
-        };
-
-        let parts: Vec<&str> = args.splitn(2, ' ').collect();
-        let sub_cmd = if args.is_empty() { "list" } else { parts[0] };
-        let sub_args = parts.get(1).unwrap_or(&"").trim();
-
-        match sub_cmd {
-            "list" => {
-                if gs.bestiary_entries.is_empty() {
-                    self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-                        "No creature templates in bestiary.".to_string(),
-                        Style::default().fg(Color::Yellow),
-                    )]));
-                    return;
-                }
-                let mut lines = vec![StyledLine::new(
-                    "Bestiary:".to_string(),
-                    Style::default().fg(Color::Cyan),
-                )];
-                for entry in &gs.bestiary_entries {
-                    let hp_str = entry
-                        .stats
-                        .iter()
-                        .find(|s| s.name == "hp_max")
-                        .map(|s| format!(" HP: {}", s.value as i64))
-                        .unwrap_or_default();
-                    let ac_str = entry
-                        .stats
-                        .iter()
-                        .find(|s| s.name == "ac")
-                        .map(|s| format!(" AC: {}", s.value as i64))
-                        .unwrap_or_default();
-                    lines.push(StyledLine::plain(format!(
-                        "  {}{hp_str}{ac_str}",
-                        entry.name
-                    )));
-                }
-                self.apply_command_result(CommandResult::Output(lines));
-            }
-            "info" => {
-                if sub_args.is_empty() {
-                    self.apply_command_result(CommandResult::Error(
-                        "Usage: bestiary info <name>".to_string(),
-                    ));
-                    return;
-                }
-                match crate::bestiary::find_entry(&gs.bestiary_entries, sub_args) {
-                    Some(entry) => {
-                        let mut lines = vec![StyledLine::new(
-                            entry.name.clone(),
-                            Style::default().fg(Color::Cyan),
-                        )];
-                        for stat in &entry.stats {
-                            lines.push(StyledLine::plain(format!(
-                                "  {}: {}",
-                                stat.name, stat.value
-                            )));
-                        }
-                        self.apply_command_result(CommandResult::Output(lines));
-                    }
-                    None => {
-                        self.apply_command_result(CommandResult::Error(format!(
-                            "Creature \"{sub_args}\" not found in bestiary."
-                        )));
-                    }
-                }
-            }
-            other => {
-                self.apply_command_result(CommandResult::Error(format!(
-                    "Unknown bestiary subcommand \"{other}\". Try: list, info"
-                )));
-            }
-        }
-    }
-
     fn handle_spawn_command(&mut self, args: &str) {
         if args.is_empty() {
             self.apply_command_result(CommandResult::Error(
-                "Usage: spawn <template> [name] (e.g. spawn goblin, spawn goblin \"Goblin Guard\")"
-                    .to_string(),
+                "Usage: spawn <npc_folder> [name] (e.g. spawn goblin_king Guard)".to_string(),
             ));
             return;
         }
 
-        // Parse args: first word is template, rest is optional name
+        // Parse args: first word is npc_folder, rest is optional name
         let parts: Vec<&str> = args.splitn(2, ' ').collect();
-        let template_name = parts[0];
+        let folder_name = parts[0];
         let custom_name = parts.get(1).map(|s| s.trim()).filter(|s| !s.is_empty());
 
         let gs = match &self.game_state {
@@ -1929,23 +1867,54 @@ impl App {
             }
         };
 
-        // Look up the bestiary entry
-        let entry = match crate::bestiary::find_entry(&gs.bestiary_entries, template_name) {
-            Some(e) => e.clone(),
+        // Find the NPC folder (case-insensitive)
+        let npc_dir = gs.campaign_path.join("npc");
+        let template_folder = match find_npc_folder(&npc_dir, folder_name) {
+            Some(path) => path,
             None => {
                 self.apply_command_result(CommandResult::Error(format!(
-                    "Creature template \"{template_name}\" not found in bestiary."
+                    "NPC folder \"{folder_name}\" not found in npc/."
                 )));
                 return;
             }
         };
 
+        // Load the template character from the folder
+        let expected_columns: Vec<String> = gs
+            .schema
+            .as_ref()
+            .map(|s| {
+                s.character_schema
+                    .column_names()
+                    .iter()
+                    .map(|c| c.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let expected_refs: Vec<&str> = expected_columns.iter().map(|s| s.as_str()).collect();
+
+        let template_char =
+            match crate::game_state::loader::load_character_from_folder(&template_folder, &expected_refs)
+            {
+                Ok(c) => c,
+                Err(errs) => {
+                    let msg = errs
+                        .iter()
+                        .map(|e| e.message.clone())
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    self.apply_command_result(CommandResult::Error(format!(
+                        "Failed to load NPC template \"{folder_name}\": {msg}"
+                    )));
+                    return;
+                }
+            };
+
         // Determine the NPC name: use custom name or auto-generate
         let npc_name = match custom_name {
             Some(name) => name.to_string(),
             None => {
-                // Auto-name: "Goblin #1", "Goblin #2", etc.
-                let base = &entry.name;
+                let base = &template_char.name;
                 let mut counter = 1u32;
                 loop {
                     let candidate = format!("{base} #{counter}");
@@ -1958,9 +1927,9 @@ impl App {
             }
         };
 
-        // Create character from bestiary entry stats
+        // Create new character with template stats but new name
         let mut character = crate::game_state::Character::new(&npc_name);
-        for stat in &entry.stats {
+        for stat in &template_char.stats {
             character.stats.push(stat.clone());
         }
 
@@ -2002,13 +1971,12 @@ impl App {
 
         // Persist to disk if persistence + schema available
         let schema = gs.schema.clone();
-        let description = format!("Spawned {npc_name} from bestiary");
+        let description = format!("Spawned {npc_name} from {folder_name}");
         if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &schema) {
             if let Err(e) = pl.persist_character(&character, false, schema, &description) {
                 self.apply_command_result(CommandResult::Error(format!(
                     "Spawned {npc_name} but failed to persist: {e}"
                 )));
-                // Still add to game state even if persistence fails
                 self.game_state.as_mut().unwrap().add_npc(character);
                 return;
             }
@@ -2019,170 +1987,15 @@ impl App {
         self.game_state.as_mut().unwrap().add_npc(character);
 
         self.apply_command_result(CommandResult::Output(vec![StyledLine::new(
-            format!("Spawned {npc_name_display} from bestiary template \"{template_name}\"."),
+            format!("Spawned {npc_name_display} from NPC template \"{folder_name}\"."),
             Style::default().fg(Color::Green),
         )]));
     }
 
-    fn handle_encounter_command(&mut self, args: &str) {
-        if args.is_empty() {
-            self.apply_command_result(CommandResult::Error(
-                "Usage: encounter <name> (e.g. encounter goblin patrol)".to_string(),
-            ));
-            return;
-        }
-
-        let gs = match &self.game_state {
-            Some(gs) => gs,
-            None => {
-                self.apply_command_result(CommandResult::Error("No campaign loaded.".to_string()));
-                return;
-            }
-        };
-
-        let encounter = match crate::bestiary::find_encounter(&gs.bestiary_encounters, args) {
-            Some(e) => e.clone(),
-            None => {
-                self.apply_command_result(CommandResult::Error(format!(
-                    "Encounter \"{args}\" not found."
-                )));
-                return;
-            }
-        };
-
-        let mut spawned_names: Vec<String> = Vec::new();
-        let mut errors: Vec<String> = Vec::new();
-
-        for creature_def in &encounter.creatures {
-            // Look up the bestiary template
-            let gs = self.game_state.as_ref().unwrap();
-            let entry =
-                match crate::bestiary::find_entry(&gs.bestiary_entries, &creature_def.template) {
-                    Some(e) => e.clone(),
-                    None => {
-                        errors.push(format!(
-                            "Template \"{}\" not found in bestiary.",
-                            creature_def.template
-                        ));
-                        continue;
-                    }
-                };
-
-            for i in 0..creature_def.count {
-                // Determine name: use name_override for count=1, otherwise auto-name
-                let npc_name = if let Some(ref override_name) = creature_def.name_override {
-                    if creature_def.count == 1 {
-                        override_name.clone()
-                    } else {
-                        format!("{override_name} #{}", i + 1)
-                    }
-                } else {
-                    // Auto-name: "Goblin #N" with incrementing counter
-                    let base = &entry.name;
-                    let mut counter = 1u32;
-                    loop {
-                        let candidate = format!("{base} #{counter}");
-                        let gs = self.game_state.as_ref().unwrap();
-                        if gs.get_npc(&candidate).is_none() {
-                            break candidate;
-                        }
-                        counter += 1;
-                    }
-                };
-
-                let mut character = crate::game_state::Character::new(&npc_name);
-                for stat in &entry.stats {
-                    character.stats.push(stat.clone());
-                }
-
-                // Apply resource_defs (gauges/pools) from rules
-                let gs = self.game_state.as_ref().unwrap();
-                if let Some(rules) = &gs.rules {
-                    for def in &rules.resource_defs {
-                        match def {
-                            crate::rules::loader::ResourceDef::Gauge { name, max_stat } => {
-                                if !character.gauges.contains_key(name) {
-                                    let max_val = character.get_stat(max_stat).unwrap_or(0.0);
-                                    if max_val > 0.0 {
-                                        character.gauges.insert(
-                                            name.clone(),
-                                            crate::game_state::primitives::Gauge::new(
-                                                name, max_val,
-                                            ),
-                                        );
-                                    }
-                                }
-                            }
-                            crate::rules::loader::ResourceDef::Pool {
-                                name,
-                                max,
-                                resets_on,
-                            } => {
-                                if !character.pools.contains_key(name) {
-                                    character.pools.insert(
-                                        name.clone(),
-                                        crate::game_state::primitives::Pool::new(
-                                            name,
-                                            *max,
-                                            resets_on.clone(),
-                                        ),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Persist to disk if persistence + schema available
-                let schema = gs.schema.clone();
-                let description = format!("Spawned {} from encounter {}", npc_name, encounter.name);
-                if let (Some(ref pl), Some(ref schema)) = (&self.persistence, &schema) {
-                    if let Err(e) = pl.persist_character(&character, false, schema, &description) {
-                        errors.push(format!("Failed to persist {npc_name}: {e}"));
-                    }
-                }
-
-                spawned_names.push(npc_name.clone());
-                self.game_state.as_mut().unwrap().add_npc(character);
-            }
-        }
-
-        // Build output
-        let mut lines: Vec<StyledLine> = Vec::new();
-        if !encounter.description.is_empty() {
-            lines.push(StyledLine::new(
-                encounter.description.clone(),
-                Style::default().fg(Color::Yellow),
-            ));
-        }
-        if !spawned_names.is_empty() {
-            lines.push(StyledLine::new(
-                format!(
-                    "Encounter \"{}\" spawned {} creature(s): {}",
-                    encounter.name,
-                    spawned_names.len(),
-                    spawned_names.join(", ")
-                ),
-                Style::default().fg(Color::Green),
-            ));
-        }
-        for err in &errors {
-            lines.push(StyledLine::new(
-                err.clone(),
-                Style::default().fg(Color::Red),
-            ));
-        }
-        if spawned_names.is_empty() && errors.is_empty() {
-            lines.push(StyledLine::new(
-                format!(
-                    "Encounter \"{}\" has no creatures to spawn.",
-                    encounter.name
-                ),
-                Style::default().fg(Color::Yellow),
-            ));
-        }
-
-        self.apply_command_result(CommandResult::Output(lines));
+    fn handle_encounter_command(&mut self, _args: &str) {
+        self.apply_command_result(CommandResult::Error(
+            "Encounter commands are being reworked. Use: encounter ls, encounter show <zone>, encounter roll <zone>".to_string(),
+        ));
     }
 
     fn handle_combat_command(&mut self, args: &str) {
@@ -5686,293 +5499,9 @@ mod tests {
         }
     }
 
-    // --- Bestiary command tests ---
-
-    #[test]
-    fn test_bestiary_no_campaign() {
-        let mut app = App::new();
-        app.running = true;
-        app.dispatch_command("bestiary");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("No campaign"),
-            "Should report no campaign. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_bestiary_list_empty() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("bestiary_empty");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
-        )
-        .unwrap();
-
-        let mut app = App::new();
-        app.running = true;
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("bestiary");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("No creature templates"),
-            "Should report empty bestiary. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_bestiary_list_shows_creatures() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("bestiary_list");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
-        std::fs::write(
-            campaign.join("bestiary/goblin.csv"),
-            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
-        )
-        .unwrap();
-        std::fs::write(
-            campaign.join("bestiary/orc.csv"),
-            "name,strength,hp_max,ac\nOrc,16,15,13\n",
-        )
-        .unwrap();
-
-        let mut app = App::new();
-        app.running = true;
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("bestiary list");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("Goblin"),
-            "Should list Goblin. Got: {output}"
-        );
-        assert!(output.contains("Orc"), "Should list Orc. Got: {output}");
-        assert!(
-            output.contains("HP: 7"),
-            "Should show Goblin HP. Got: {output}"
-        );
-        assert!(
-            output.contains("AC: 15"),
-            "Should show Goblin AC. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_bestiary_info_shows_stats() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("bestiary_info");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
-        std::fs::write(
-            campaign.join("bestiary/goblin.csv"),
-            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
-        )
-        .unwrap();
-
-        let mut app = App::new();
-        app.running = true;
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("bestiary info goblin");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("Goblin"),
-            "Should show creature name. Got: {output}"
-        );
-        assert!(
-            output.contains("strength"),
-            "Should show strength stat. Got: {output}"
-        );
-        assert!(
-            output.contains("8"),
-            "Should show strength value. Got: {output}"
-        );
-        assert!(
-            output.contains("hp_max"),
-            "Should show hp_max stat. Got: {output}"
-        );
-        assert!(
-            output.contains("7"),
-            "Should show hp_max value. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_bestiary_info_case_insensitive() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("bestiary_case");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
-        std::fs::write(
-            campaign.join("bestiary/goblin.csv"),
-            "name,strength\nGoblin,8\n",
-        )
-        .unwrap();
-
-        let mut app = App::new();
-        app.running = true;
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("bestiary info GOBLIN");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("Goblin"),
-            "Should find Goblin case-insensitively. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_bestiary_info_not_found() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("bestiary_nf");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"T\"\n\n[character.schema]\ncolumns = [\"name\", \"strength\"]\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
-
-        let mut app = App::new();
-        app.running = true;
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("bestiary info dragon");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("not found"),
-            "Should report not found. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_bestiary_info_no_args() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("bestiary_noargs");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"T\"\n",
-        )
-        .unwrap();
-
-        let mut app = App::new();
-        app.running = true;
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("bestiary info");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
-    }
-
-    #[test]
-    fn test_bestiary_unknown_subcommand() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("bestiary_bad");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"T\"\n",
-        )
-        .unwrap();
-
-        let mut app = App::new();
-        app.running = true;
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("bestiary foo");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("Unknown bestiary subcommand"),
-            "Should report unknown subcommand. Got: {output}"
-        );
-    }
-
     // --- Spawn command tests ---
 
-    fn setup_bestiary_campaign(dir: &TempDir, name: &str) -> std::path::PathBuf {
+    fn setup_spawn_campaign(dir: &TempDir, name: &str) -> std::path::PathBuf {
         let campaign = dir.path().join(name);
         std::fs::create_dir_all(campaign.join("rules")).unwrap();
         std::fs::write(
@@ -5982,9 +5511,10 @@ mod tests {
              [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
         )
         .unwrap();
-        std::fs::create_dir_all(campaign.join("bestiary")).unwrap();
+        // Create an NPC folder to use as a template
+        std::fs::create_dir_all(campaign.join("npc/goblin")).unwrap();
         std::fs::write(
-            campaign.join("bestiary/goblin.csv"),
+            campaign.join("npc/goblin/sheet.csv"),
             "name,strength,hp_max,ac\nGoblin,8,7,15\n",
         )
         .unwrap();
@@ -5994,7 +5524,7 @@ mod tests {
     #[test]
     fn test_spawn_creates_npc_with_correct_stats() {
         let dir = TempDir::new().unwrap();
-        let campaign = setup_bestiary_campaign(&dir, "spawn_stats");
+        let campaign = setup_spawn_campaign(&dir, "spawn_stats");
 
         let mut app = App::new();
         app.load_campaign(&campaign);
@@ -6031,7 +5561,7 @@ mod tests {
     #[test]
     fn test_spawn_auto_names_incrementing() {
         let dir = TempDir::new().unwrap();
-        let campaign = setup_bestiary_campaign(&dir, "spawn_autoname");
+        let campaign = setup_spawn_campaign(&dir, "spawn_autoname");
 
         let mut app = App::new();
         app.load_campaign(&campaign);
@@ -6042,15 +5572,17 @@ mod tests {
         app.dispatch_command("spawn goblin");
 
         let gs = app.game_state().unwrap();
+        // The template NPC "Goblin" is loaded at campaign load as npc/goblin/sheet.csv
+        // Spawns get auto-named "Goblin #1", "Goblin #2", "Goblin #3"
         assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
         assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
         assert!(gs.get_npc("Goblin #3").is_some(), "Goblin #3 should exist");
     }
 
     #[test]
-    fn test_spawn_unknown_template_error() {
+    fn test_spawn_unknown_folder_error() {
         let dir = TempDir::new().unwrap();
-        let campaign = setup_bestiary_campaign(&dir, "spawn_unknown");
+        let campaign = setup_spawn_campaign(&dir, "spawn_unknown");
 
         let mut app = App::new();
         app.load_campaign(&campaign);
@@ -6067,7 +5599,7 @@ mod tests {
             .join("\n");
         assert!(
             output.contains("not found"),
-            "Should report template not found. Got: {output}"
+            "Should report folder not found. Got: {output}"
         );
     }
 
@@ -6094,7 +5626,7 @@ mod tests {
     #[test]
     fn test_spawn_no_args_error() {
         let dir = TempDir::new().unwrap();
-        let campaign = setup_bestiary_campaign(&dir, "spawn_noargs");
+        let campaign = setup_spawn_campaign(&dir, "spawn_noargs");
 
         let mut app = App::new();
         app.load_campaign(&campaign);
@@ -6112,109 +5644,16 @@ mod tests {
         assert!(output.contains("Usage"), "Should show usage. Got: {output}");
     }
 
-    // --- Encounter command tests ---
-
-    fn setup_encounter_campaign(dir: &TempDir, name: &str) -> std::path::PathBuf {
-        let campaign = dir.path().join(name);
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"Test\"\n\n\
-             [character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n\n\
-             [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(campaign.join("bestiary/encounters")).unwrap();
-        std::fs::write(
-            campaign.join("bestiary/goblin.csv"),
-            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
-        )
-        .unwrap();
-        std::fs::write(
-            campaign.join("bestiary/orc.csv"),
-            "name,strength,hp_max,ac\nOrc,16,15,13\n",
-        )
-        .unwrap();
-        std::fs::write(
-            campaign.join("bestiary/encounters/goblin_patrol.toml"),
-            "[encounter]\nname = \"Goblin Patrol\"\n\
-             description = \"A small group of goblins on the road\"\n\n\
-             [[creatures]]\ntemplate = \"goblin\"\ncount = 3\n\n\
-             [[creatures]]\ntemplate = \"orc\"\ncount = 1\n\
-             name_override = \"Orc Chieftain\"\n",
-        )
-        .unwrap();
-        campaign
-    }
-
     #[test]
-    fn test_encounter_spawns_correct_creatures() {
+    fn test_spawn_case_insensitive_folder() {
         let dir = TempDir::new().unwrap();
-        let campaign = setup_encounter_campaign(&dir, "enc_spawn");
+        let campaign = setup_spawn_campaign(&dir, "spawn_case");
 
         let mut app = App::new();
         app.load_campaign(&campaign);
         app.messages.clear();
 
-        app.dispatch_command("encounter goblin patrol");
-
-        let gs = app.game_state().unwrap();
-        // Should have 3 goblins + 1 orc chieftain = 4 NPCs
-        assert_eq!(
-            gs.npcs.len(),
-            4,
-            "Should spawn 4 NPCs. Got: {:?}",
-            gs.npcs.iter().map(|n| &n.name).collect::<Vec<_>>()
-        );
-
-        assert!(gs.get_npc("Goblin #1").is_some(), "Goblin #1 should exist");
-        assert!(gs.get_npc("Goblin #2").is_some(), "Goblin #2 should exist");
-        assert!(gs.get_npc("Goblin #3").is_some(), "Goblin #3 should exist");
-        assert!(
-            gs.get_npc("Orc Chieftain").is_some(),
-            "Orc Chieftain should exist"
-        );
-    }
-
-    #[test]
-    fn test_encounter_creatures_have_correct_stats() {
-        let dir = TempDir::new().unwrap();
-        let campaign = setup_encounter_campaign(&dir, "enc_stats");
-
-        let mut app = App::new();
-        app.load_campaign(&campaign);
-
-        app.dispatch_command("encounter goblin patrol");
-
-        let gs = app.game_state().unwrap();
-        let goblin = gs.get_npc("Goblin #1").unwrap();
-        assert_eq!(goblin.get_stat("strength"), Some(8.0));
-        assert_eq!(goblin.get_stat("hp_max"), Some(7.0));
-        assert_eq!(goblin.get_stat("ac"), Some(15.0));
-        assert!(
-            goblin.gauges.contains_key("hp"),
-            "HP gauge should be created"
-        );
-        assert_eq!(goblin.gauges["hp"].max, 7.0);
-
-        let orc = gs.get_npc("Orc Chieftain").unwrap();
-        assert_eq!(orc.get_stat("strength"), Some(16.0));
-        assert_eq!(orc.get_stat("hp_max"), Some(15.0));
-        assert_eq!(orc.get_stat("ac"), Some(13.0));
-        assert!(orc.gauges.contains_key("hp"));
-        assert_eq!(orc.gauges["hp"].max, 15.0);
-    }
-
-    #[test]
-    fn test_encounter_output_shows_summary() {
-        let dir = TempDir::new().unwrap();
-        let campaign = setup_encounter_campaign(&dir, "enc_output");
-
-        let mut app = App::new();
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("encounter goblin patrol");
+        app.dispatch_command("spawn Goblin Guard");
 
         let output: String = app
             .messages
@@ -6224,137 +5663,8 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            output.contains("Goblin Patrol"),
-            "Should show encounter name. Got: {output}"
-        );
-        assert!(
-            output.contains("4 creature(s)"),
-            "Should show count. Got: {output}"
-        );
-        assert!(
-            output.contains("A small group of goblins"),
-            "Should show description. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_encounter_not_found_error() {
-        let dir = TempDir::new().unwrap();
-        let campaign = setup_encounter_campaign(&dir, "enc_notfound");
-
-        let mut app = App::new();
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("encounter dragon horde");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("not found"),
-            "Should report not found. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_encounter_no_campaign_error() {
-        let mut app = App::new();
-        app.messages.clear();
-
-        app.dispatch_command("encounter goblin patrol");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("No campaign loaded"),
-            "Should report no campaign. Got: {output}"
-        );
-    }
-
-    #[test]
-    fn test_encounter_no_args_error() {
-        let dir = TempDir::new().unwrap();
-        let campaign = setup_encounter_campaign(&dir, "enc_noargs");
-
-        let mut app = App::new();
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("encounter");
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(output.contains("Usage"), "Should show usage. Got: {output}");
-    }
-
-    #[test]
-    fn test_encounter_unknown_template_partial_spawn() {
-        let dir = TempDir::new().unwrap();
-        let campaign = dir.path().join("enc_partial");
-        std::fs::create_dir_all(campaign.join("rules")).unwrap();
-        std::fs::write(
-            campaign.join("rules/system.toml"),
-            "[system]\nname = \"Test\"\n\n\
-             [character.schema]\ncolumns = [\"name\", \"strength\", \"hp_max\", \"ac\"]\n\n\
-             [resources.hp]\ntype = \"gauge\"\nmax_stat = \"hp_max\"\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(campaign.join("bestiary/encounters")).unwrap();
-        std::fs::write(
-            campaign.join("bestiary/goblin.csv"),
-            "name,strength,hp_max,ac\nGoblin,8,7,15\n",
-        )
-        .unwrap();
-        // Encounter references a template that doesn't exist
-        std::fs::write(
-            campaign.join("bestiary/encounters/mixed.toml"),
-            "[encounter]\nname = \"Mixed\"\n\n\
-             [[creatures]]\ntemplate = \"goblin\"\ncount = 2\n\n\
-             [[creatures]]\ntemplate = \"dragon\"\ncount = 1\n",
-        )
-        .unwrap();
-
-        let mut app = App::new();
-        app.load_campaign(&campaign);
-        app.messages.clear();
-
-        app.dispatch_command("encounter mixed");
-
-        let gs = app.game_state().unwrap();
-        // Should still spawn the 2 goblins even though dragon template is missing
-        assert_eq!(
-            gs.npcs.len(),
-            2,
-            "Should spawn goblins despite missing dragon template"
-        );
-        assert!(gs.get_npc("Goblin #1").is_some());
-        assert!(gs.get_npc("Goblin #2").is_some());
-
-        let output: String = app
-            .messages
-            .iter()
-            .map(|m| &m.text)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            output.contains("dragon"),
-            "Should report missing template. Got: {output}"
+            output.contains("Spawned Guard"),
+            "Should spawn with case-insensitive folder match. Got: {output}"
         );
     }
 

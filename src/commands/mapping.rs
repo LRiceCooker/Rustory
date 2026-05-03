@@ -1,4 +1,3 @@
-pub const BESTIARY: &str = "bestiary";
 pub const COMBAT: &str = "combat";
 pub const ENCOUNTER: &str = "encounter";
 pub const HELP: &str = "help";
@@ -25,7 +24,7 @@ pub const SPAWN: &str = "spawn";
 pub const UNDO: &str = "undo";
 pub const VALIDATE: &str = "validate";
 
-pub const COMMANDS: [&str; 25] = [
-    BESTIARY, COMBAT, ENCOUNTER, HELP, HISTORY, INIT, LIST, LOAD, MAP, NEW, NEXT, NOTE, PREV, QUIT,
-    REDO, ROLL, SEARCH, SET, SHOW, SOUND, SPAWN, STATUS, TARGET, UNDO, VALIDATE,
+pub const COMMANDS: [&str; 24] = [
+    COMBAT, ENCOUNTER, HELP, HISTORY, INIT, LIST, LOAD, MAP, NEW, NEXT, NOTE, PREV, QUIT, REDO,
+    ROLL, SEARCH, SET, SHOW, SOUND, SPAWN, STATUS, TARGET, UNDO, VALIDATE,
 ];

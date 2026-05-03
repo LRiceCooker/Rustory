@@ -1,6 +1,5 @@
 pub mod app;
 pub mod audio;
-pub mod bestiary;
 pub mod combat;
 pub mod commands;
 pub mod game_state;

@@ -130,9 +130,6 @@ pub fn dispatch(
         mapping::VALIDATE => {
             CommandResult::Error("validate command must be handled by the app".to_string())
         }
-        mapping::BESTIARY => {
-            CommandResult::Error("bestiary command must be handled by the app".to_string())
-        }
         mapping::COMBAT
         | mapping::INIT
         | mapping::NEXT

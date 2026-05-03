@@ -94,7 +94,7 @@ pub fn load_characters_from_dir(dir: &Path, expected_columns: &[&str]) -> LoadRe
 }
 
 /// Load a single character from a folder containing sheet.csv and optional files.
-fn load_character_from_folder(
+pub fn load_character_from_folder(
     folder: &Path,
     expected_columns: &[&str],
 ) -> Result<Character, Vec<LoadError>> {
