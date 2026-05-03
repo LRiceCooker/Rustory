@@ -19,9 +19,13 @@ pub fn parse(input: &str) -> Result<Roll, String> {
         ));
     }
 
-    let dice: u32 = parts[0]
-        .parse()
-        .map_err(|_| format!("Invalid dice count: \"{}\"", parts[0]))?;
+    let dice: u32 = if parts[0].is_empty() {
+        1 // "d20" is treated as "1d20"
+    } else {
+        parts[0]
+            .parse()
+            .map_err(|_| format!("Invalid dice count: \"{}\"", parts[0]))?
+    };
 
     if dice == 0 {
         return Err("Dice count must be at least 1".to_string());
@@ -143,9 +147,42 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_missing_count() {
-        // "d6" has empty string before 'd'
-        assert!(parse("d6").is_err());
+    fn test_parse_missing_count_defaults_to_one() {
+        // "d6" → 1d6 (implicit single die)
+        assert_eq!(
+            parse("d6").unwrap(),
+            Roll {
+                dice: 1,
+                value: 6,
+                modifier: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_d20() {
+        // "d20" → 1d20
+        assert_eq!(
+            parse("d20").unwrap(),
+            Roll {
+                dice: 1,
+                value: 20,
+                modifier: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_d20_with_modifier() {
+        // "d20+5" → 1d20+5
+        assert_eq!(
+            parse("d20+5").unwrap(),
+            Roll {
+                dice: 1,
+                value: 20,
+                modifier: 5
+            }
+        );
     }
 
     #[test]

@@ -110,6 +110,21 @@ fn calc_expr(args: &str, rng: &mut dyn RngCore) -> CommandResult {
     }
 }
 
+/// Check if input looks like dice notation and try to roll it.
+/// Returns Some(CommandResult) if the input is valid dice notation, None otherwise.
+fn try_implicit_roll(input: &str, rng: &mut dyn RngCore) -> Option<CommandResult> {
+    let first = input.chars().next()?;
+    if !(first.is_ascii_digit() || first == 'd') || !input.contains('d') {
+        return None;
+    }
+    // Only treat as implicit roll if it parses successfully
+    if roll::parse(input).is_ok() {
+        Some(roll_dice(input, rng))
+    } else {
+        None
+    }
+}
+
 pub fn dispatch(
     input: &str,
     rng: &mut dyn RngCore,
@@ -180,6 +195,11 @@ pub fn dispatch(
             CommandResult::Error("encounter command must be handled by the app".to_string())
         }
         _ => {
+            // Implicit roll: if input looks like dice notation (e.g. "2d6+3", "d20"),
+            // treat it as a roll without requiring the "roll" prefix
+            if let Some(result) = try_implicit_roll(command, rng) {
+                return result;
+            }
             // Look up in custom commands HashMap
             if let Some(commands) = custom_commands {
                 if let Some(script) = commands.get(&command.to_lowercase()) {
@@ -396,6 +416,74 @@ mod tests {
         match dispatch("SMITE", &mut *test_rng(), Some(&customs)) {
             CommandResult::Custom(script) => assert_eq!(script.name, "smite"),
             other => panic!("expected Custom, got {other:?}"),
+        }
+    }
+
+    // --- Implicit roll tests ---
+
+    #[test]
+    fn test_implicit_roll_2d6_plus_3() {
+        match dispatch("2d6+3", &mut *test_rng(), None) {
+            CommandResult::Output(lines) => {
+                assert!(lines[0].text.contains("2 dice(s)"));
+                assert!(lines[0].text.contains("maximum value: 6"));
+            }
+            other => panic!("expected Output for implicit roll, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_implicit_roll_d20() {
+        match dispatch("d20", &mut *test_rng(), None) {
+            CommandResult::Output(lines) => {
+                assert!(lines[0].text.contains("1 dice(s)"));
+                assert!(lines[0].text.contains("maximum value: 20"));
+            }
+            other => panic!("expected Output for implicit d20 roll, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_implicit_roll_1d20_plus_5() {
+        match dispatch("1d20+5", &mut *test_rng(), None) {
+            CommandResult::Output(lines) => {
+                assert!(lines[0].text.contains("1 dice(s)"));
+                assert!(lines[0].text.contains("maximum value: 20"));
+                assert!(lines[0].text.contains("+5"));
+            }
+            other => panic!("expected Output for implicit 1d20+5 roll, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_implicit_roll_regular_commands_still_work() {
+        // "help" should NOT be treated as dice notation
+        match dispatch("help", &mut *test_rng(), None) {
+            CommandResult::Output(lines) => {
+                assert!(lines[0].text.contains("Available commands"));
+            }
+            other => panic!("expected help Output, got {other:?}"),
+        }
+
+        // "quit" should still work
+        assert_eq!(
+            dispatch("quit", &mut *test_rng(), None),
+            CommandResult::Quit
+        );
+
+        // "foobar" should still be unknown
+        match dispatch("foobar", &mut *test_rng(), None) {
+            CommandResult::Unknown(cmd) => assert_eq!(cmd, "foobar"),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_implicit_roll_invalid_dice_not_treated_as_roll() {
+        // "d" alone should not be treated as a roll
+        match dispatch("d", &mut *test_rng(), None) {
+            CommandResult::Unknown(_) => {}
+            other => panic!("expected Unknown for bare 'd', got {other:?}"),
         }
     }
 
