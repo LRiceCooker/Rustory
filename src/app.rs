@@ -6,7 +6,7 @@ use crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use rand::{Rng, RngCore};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::DefaultTerminal;
 
@@ -683,33 +683,59 @@ impl App {
 
     fn handle_help_command(&mut self) {
         let mut lines = vec![
-            StyledLine::plain("Available commands:"),
-            StyledLine::plain("  help  — show this help"),
-            StyledLine::plain("  load  — load a campaign folder (e.g. load sample)"),
-            StyledLine::plain(
-                "  new   — create a new campaign from a template (e.g. new my_game sample)",
+            StyledLine::new(
+                "Commands:".to_string(),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             ),
-            StyledLine::plain("  roll  — roll dice (e.g. roll 2d6+3)"),
-            StyledLine::plain("  calc  — evaluate math (e.g. calc 15+3+4, calc 2*1d6)"),
-            StyledLine::plain("  cat      — display a file (e.g. cat npc/goblin_king/dialogues.md)"),
-            StyledLine::plain("  clear    — clear the output history"),
-            StyledLine::plain("  show     — display character sheet (e.g. show thorin)"),
-            StyledLine::plain("  set      — set a character field (e.g. set thorin.hp 35)"),
-            StyledLine::plain("  ls       — list things (e.g. ls players, ls sound, ls encounters)"),
-            StyledLine::plain("  history  — show recent state changes (e.g. history 5)"),
-            StyledLine::plain("  undo     — revert the last state change"),
-            StyledLine::plain("  redo     — re-apply the last undone change"),
-            StyledLine::plain("  sound    — play audio (e.g. sound play tavern, or just: play tavern)"),
-            StyledLine::plain(
-                "  spawn     — duplicate NPC folder as new NPC (e.g. spawn goblin_king Guard)",
-            ),
-            StyledLine::plain(
-                "  encounter — encounter tables (e.g. encounter show forest, encounter roll forest)",
-            ),
-            StyledLine::plain("  who      — player dashboard (HP, conditions, location)"),
-            StyledLine::plain("  where    — show all character map locations"),
-            StyledLine::plain("  validate — check campaign files against schemas"),
-            StyledLine::plain("  quit     — exit Rustory"),
+            StyledLine::plain(""),
+            StyledLine::new("  General".to_string(), Style::default().fg(Color::Yellow)),
+            StyledLine::plain("  help           — show this help                        (h)"),
+            StyledLine::plain("  quit           — exit Rustory                          (q)"),
+            StyledLine::plain("  clear          — clear the output history"),
+            StyledLine::plain("  load <path>    — load a campaign folder"),
+            StyledLine::plain("  new <name> <t> — create campaign from template"),
+            StyledLine::plain("  validate [p]   — check campaign files against schemas  (v)"),
+            StyledLine::plain(""),
+            StyledLine::new("  Dice & Math".to_string(), Style::default().fg(Color::Yellow)),
+            StyledLine::plain("  roll <NdV+M>   — roll dice (e.g. roll 2d6+3)          (r)"),
+            StyledLine::plain("  calc <expr>    — evaluate math (e.g. calc 15+3+4)"),
+            StyledLine::plain("                   tip: just type 2d6+3 to roll without 'roll'"),
+            StyledLine::plain(""),
+            StyledLine::new("  Characters".to_string(), Style::default().fg(Color::Yellow)),
+            StyledLine::plain("  ls players     — list players                          (ls npc, ls sound, ...)"),
+            StyledLine::plain("  show <char>    — display character sheet               (s)"),
+            StyledLine::plain("  set <c>.<f> <v>— set a field (e.g. set thorin.hp 35)"),
+            StyledLine::plain("  who            — player dashboard (HP, conditions)     (w)"),
+            StyledLine::plain("  where          — all character locations               (wh)"),
+            StyledLine::plain("  damage <c> <n> — deal damage to character              (dmg)"),
+            StyledLine::plain("  heal <c> <n>   — restore HP                            (hp)"),
+            StyledLine::plain("  give <i> <f> <t>— transfer item between characters"),
+            StyledLine::plain("  spawn <npc> [n]— duplicate NPC as new character        (sp)"),
+            StyledLine::plain("  cat <file>     — display a campaign file"),
+            StyledLine::plain(""),
+            StyledLine::new("  Combat".to_string(), Style::default().fg(Color::Yellow)),
+            StyledLine::plain("  combat start   — enter combat mode (auto-adds players)"),
+            StyledLine::plain("  combat end     — exit combat mode"),
+            StyledLine::plain("  init add/roll/remove — manage initiative"),
+            StyledLine::plain("  next / prev    — advance/rewind turn                   (n / p)"),
+            StyledLine::plain("  status         — show combatant overview               (st)"),
+            StyledLine::plain("  target <name>  — set persistent target for dmg/heal"),
+            StyledLine::plain(""),
+            StyledLine::new("  World".to_string(), Style::default().fg(Color::Yellow)),
+            StyledLine::plain("  map            — toggle map view"),
+            StyledLine::plain("  map info/search/near/route — query map data"),
+            StyledLine::plain("  mv <c> <loc>   — move character to a location          (= map move)"),
+            StyledLine::plain("  encounter show/roll <zone> — encounter tables          (enc)"),
+            StyledLine::plain("  search <query> — fuzzy search PDFs + markdown"),
+            StyledLine::plain(""),
+            StyledLine::new("  Audio".to_string(), Style::default().fg(Color::Yellow)),
+            StyledLine::plain("  play <sound>   — play sound (fuzzy match)              (= sound play)"),
+            StyledLine::plain("  sound stop/pause/resume/volume/status"),
+            StyledLine::plain(""),
+            StyledLine::new("  Session".to_string(), Style::default().fg(Color::Yellow)),
+            StyledLine::plain("  note <text>    — add a session note"),
+            StyledLine::plain("  undo / redo    — state management                      (u / re)"),
+            StyledLine::plain("  history [n]    — show recent changes                   (hist)"),
         ];
 
         // Campaign status
@@ -5190,9 +5216,7 @@ mod tests {
         let output_texts: Vec<&str> = app.messages.iter().map(|m| m.text.as_str()).collect();
         // Built-in help should win
         assert!(
-            output_texts
-                .iter()
-                .any(|t| t.contains("Available commands")),
+            output_texts.iter().any(|t| t.contains("Commands:")),
             "Built-in help should win over custom. Messages: {output_texts:?}"
         );
         assert!(

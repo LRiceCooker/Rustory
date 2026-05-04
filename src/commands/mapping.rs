@@ -60,11 +60,58 @@ const ALIASES: &[(&str, &str)] = &[
 /// All strings that can start a command — canonical commands + alias keys.
 /// Used for autocomplete (Tab hint matching).
 pub const ALL_COMPLETABLE: &[&str] = &[
-    "calc", "cat", "clear", "combat", "damage", "dmg", "enc", "encounter", "give", "h", "heal",
-    "help", "hist", "history", "hp", "init", "list", "load", "ls", "map", "mv", "n", "new",
-    "next", "note", "p", "play", "prev", "q", "quit", "r", "re", "redo", "roll", "s", "search",
-    "set", "show", "sound", "sp", "spawn", "st", "status", "target", "u", "undo", "v", "validate",
-    "w", "wh", "where", "who",
+    "calc",
+    "cat",
+    "clear",
+    "combat",
+    "damage",
+    "dmg",
+    "enc",
+    "encounter",
+    "give",
+    "h",
+    "heal",
+    "help",
+    "hist",
+    "history",
+    "hp",
+    "init",
+    "list",
+    "load",
+    "ls",
+    "map",
+    "mv",
+    "n",
+    "new",
+    "next",
+    "note",
+    "p",
+    "play",
+    "prev",
+    "q",
+    "quit",
+    "r",
+    "re",
+    "redo",
+    "roll",
+    "s",
+    "search",
+    "set",
+    "show",
+    "sound",
+    "sp",
+    "spawn",
+    "st",
+    "status",
+    "target",
+    "u",
+    "undo",
+    "v",
+    "validate",
+    "w",
+    "wh",
+    "where",
+    "who",
 ];
 
 /// Resolve a short alias to its canonical command expansion.
@@ -101,7 +148,10 @@ mod tests {
 
     #[test]
     fn test_alias_resolves_multi_word_expansion() {
-        assert_eq!(resolve_alias("mv Thorin Silverport"), "map move Thorin Silverport");
+        assert_eq!(
+            resolve_alias("mv Thorin Silverport"),
+            "map move Thorin Silverport"
+        );
         assert_eq!(resolve_alias("play tavern"), "sound play tavern");
         assert_eq!(resolve_alias("mv"), "map move");
     }
@@ -135,7 +185,10 @@ mod tests {
         assert_eq!(resolve_alias("roll 2d6"), "roll 2d6");
         assert_eq!(resolve_alias("help"), "help");
         assert_eq!(resolve_alias("show thorin"), "show thorin");
-        assert_eq!(resolve_alias("map move Thorin Silverport"), "map move Thorin Silverport");
+        assert_eq!(
+            resolve_alias("map move Thorin Silverport"),
+            "map move Thorin Silverport"
+        );
     }
 
     #[test]

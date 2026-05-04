@@ -2,8 +2,6 @@
 
 # Run the project (debug)
 run:
-    cp -r sample/ target/debug
-    cp -r assets/ target/debug
     cargo run
 
 # Build for Linux (default)

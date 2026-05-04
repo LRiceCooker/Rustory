@@ -348,7 +348,11 @@ mod tests {
         assert_eq!(thorin.get_stat("ac"), Some(18.0));
 
         // NPCs: at least Goblin King + Shopkeeper (may have spawned copies)
-        assert!(gs.npcs.len() >= 2, "Expected at least 2 NPCs, got {}", gs.npcs.len());
+        assert!(
+            gs.npcs.len() >= 2,
+            "Expected at least 2 NPCs, got {}",
+            gs.npcs.len()
+        );
         let gk = gs
             .get_npc("Goblin King")
             .expect("Goblin King should be loaded");

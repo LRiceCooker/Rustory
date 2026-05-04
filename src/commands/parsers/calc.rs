@@ -23,10 +23,7 @@ pub fn evaluate(input: &str, rng: &mut dyn RngCore) -> Result<(f64, Vec<String>)
     };
     let result = parser.parse_expr()?;
     if parser.pos < parser.tokens.len() {
-        return Err(format!(
-            "Unexpected token: {:?}",
-            parser.tokens[parser.pos]
-        ));
+        return Err(format!("Unexpected token: {:?}", parser.tokens[parser.pos]));
     }
     Ok((result, parser.roll_descriptions))
 }
@@ -207,9 +204,8 @@ impl<'a> Parser<'a> {
                     rolls.push(self.rng.gen_range(1..=sides));
                 }
                 let sum: u32 = rolls.iter().sum();
-                self.roll_descriptions.push(format!(
-                    "{count}d{sides}: {rolls:?} = {sum}"
-                ));
+                self.roll_descriptions
+                    .push(format!("{count}d{sides}: {rolls:?} = {sum}"));
                 Ok(sum as f64)
             }
             Some(Token::LParen) => {
