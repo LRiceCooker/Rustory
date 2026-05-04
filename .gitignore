@@ -5,4 +5,4 @@ x86_64-apple-darwin/
 Cargo.lock
 .DS_Store
 .claude
-./ralph
+ralph/
